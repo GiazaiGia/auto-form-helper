@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>剪映批量草稿工具</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell jianying-shell">
+    <header class="topbar">
+      <div class="brand">
+        <img src="/assets/app-icon.png" alt="">
+        <div>
+          <h1>剪映批量草稿工具</h1>
+        </div>
+      </div>
+      <div class="status-pill" id="jyStatus">待开始</div>
+    </header>
+
+    <section class="workflow-band">
+      <div class="workflow-step active">
+        <span>1</span>
+        <strong>选择模板</strong>
+      </div>
+      <div class="workflow-step">
+        <span>2</span>
+        <strong>读取任务</strong>
+      </div>
+      <div class="workflow-step">
+        <span>3</span>
+        <strong>生成草稿</strong>
+      </div>
+    </section>
+
+    <section class="grid jianying-grid">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>生成设置</h2>
+          <span id="jySaveStatus">本机配置</span>
+        </div>
+
+        <label>剪映模板草稿文件夹</label>
+        <div class="path-picker">
+          <input id="templateDir" placeholder="选择一个历史模板草稿文件夹">
+          <button id="pickTemplateBtn">选择</button>
+        </div>
+
+        <label>任务单</label>
+        <div class="path-picker">
+          <input id="taskFile" placeholder="Excel、CSV 或 JSON">
+          <button id="pickTaskBtn">选择</button>
+        </div>
+
+        <label>输出文件夹</label>
+        <div class="path-picker">
+          <input id="outputDir" placeholder="生成的新草稿保存到这里">
+          <button id="pickOutputBtn">选择</button>
+        </div>
+        <button class="ghost full-ghost" id="useJianyingDirBtn">使用剪映草稿库</button>
+
+        <label>素材总文件夹</label>
+        <div class="path-picker">
+          <input id="materialRoot" placeholder="可留空">
+          <button id="pickMaterialBtn">选择</button>
+        </div>
+
+        <div class="form-grid two">
+          <div>
+            <label>素材路径列</label>
+            <input id="materialColumn" placeholder="可留空">
+          </div>
+          <div>
+            <label>草稿命名</label>
+            <input id="namePattern" value="{{序号}}_{{标题}}">
+          </div>
+        </div>
+
+        <div class="row">
+          <label class="check">
+            <input id="replaceMaterials" type="checkbox" checked>
+            替换模板素材路径
+          </label>
+        </div>
+
+        <div class="button-row">
+          <button id="previewBtn">读取预览</button>
+          <button class="primary fit-primary" id="generateBtn">开始生成</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>任务预览</h2>
+          <span id="previewCount">未读取</span>
+        </div>
+        <div class="metric-grid">
+          <div class="metric">
+            <span>任务数</span>
+            <strong id="rowCount">0</strong>
+          </div>
+          <div class="metric">
+            <span>模板数据</span>
+            <strong id="jsonCount">0</strong>
+          </div>
+          <div class="metric">
+            <span>文字占位</span>
+            <strong id="placeholderCount">0</strong>
+          </div>
+          <div class="metric">
+            <span>素材位置</span>
+            <strong id="mediaSlotCount">0</strong>
+          </div>
+        </div>
+
+        <div class="preview-block">
+          <h3>任务字段</h3>
+          <div id="columnsList" class="tag-list"></div>
+        </div>
+
+        <div class="preview-block">
+          <h3>模板占位</h3>
+          <div id="placeholderList" class="tag-list"></div>
+        </div>
+
+        <div class="preview-block">
+          <h3>首条任务</h3>
+          <div id="firstRowBox" class="kv-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel wide">
+      <div class="panel-head">
+        <h2>运行状态</h2>
+        <div class="button-row slim-row">
+          <button id="openOutputBtn">打开输出文件夹</button>
+          <button id="refreshJobBtn">刷新</button>
+        </div>
+      </div>
+      <div class="job-line">
+        <span>任务：</span>
+        <strong id="jobState">暂无</strong>
+      </div>
+      <pre id="logBox">就绪</pre>
+    </section>
+  </main>
+
+  <script src="/jianying.js"></script>
+</body>
+</html>

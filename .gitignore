@@ -1,0 +1,28 @@
+# Dependencies and build output
+node_modules/
+release/
+output/
+logs/
+tools/
+
+# Local browser/login profiles
+.qqdocs*/
+
+# Local runtime data
+history.json
+login-status.json
+monitor-events.json
+*.log
+@AutomationLog.txt
+
+# Personal form/account data
+config/*.json
+!config/update.json
+!config/*.example.json
+
+# Local scratch/extracted files
+/app-server.js
+/monitor-platform.js
+/update.json
+/tmp-*/
+*.7z

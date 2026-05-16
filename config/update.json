@@ -1,0 +1,7 @@
+{
+  "enabled": true,
+  "provider": "github",
+  "owner": "GiazaiGia",
+  "repo": "auto-form-helper",
+  "private": false
+}

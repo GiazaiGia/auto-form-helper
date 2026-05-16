@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>自动填表助手</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell app-frame">
+    <aside class="sidebar">
+      <div class="side-brand">
+        <img src="/assets/app-icon.png" alt="">
+        <div>
+          <strong>自动填表助手</strong>
+        </div>
+      </div>
+      <nav class="side-nav">
+        <button class="nav-btn active" data-page="form">填表单</button>
+        <button class="nav-btn" data-page="monitor">监控概览</button>
+        <button class="nav-btn" data-page="history">历史记录</button>
+        <button class="nav-btn" data-page="accounts">填表资料</button>
+        <button class="nav-btn" data-page="content">抖音账号库</button>
+        <button class="nav-btn" data-page="status">运行状态</button>
+      </nav>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div>
+          <h1 id="pageTitle">填表单</h1>
+        </div>
+        <div class="topbar-actions">
+          <div class="status-pill" id="pageStatus">就绪</div>
+        </div>
+      </header>
+
+      <section class="page active" data-view="form">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>填表单</h2>
+          </div>
+          <div class="form-mode-tabs" aria-label="填表模式">
+            <button class="active" data-form-mode="auto" type="button">自动处理</button>
+            <button data-form-mode="manual" type="button">手动补填</button>
+            <button data-form-mode="advanced" type="button">测试</button>
+          </div>
+          <div class="form-shared-setup">
+            <label>参与填表微信号</label>
+            <div class="account-picker" id="fillAccountPicker"></div>
+            <div data-form-regular-only>
+              <label>提交方式</label>
+              <div class="mode-switch submit-mode-switch">
+                <button id="manualSubmitMode" class="mode-btn" type="button">填完后检查</button>
+                <button id="autoSubmitMode" class="mode-btn" type="button">填完自动提交</button>
+              </div>
+            </div>
+          </div>
+          <div class="form-mode-panel active" data-form-mode-panel="auto">
+            <div class="monitor-import-bar">
+              <button id="monitorAutoUseBtn" class="monitor-auto-use primary" type="button">开启自动处理</button>
+              <button id="stopMonitorAutoFillBtn" class="danger hidden" type="button" disabled>中止当前填写</button>
+              <span id="monitorImportSummary">等待新链接</span>
+            </div>
+            <div class="monitor-fill-progress hidden" id="monitorFillProgress"></div>
+            <div class="monitor-link-panel hidden" id="monitorLinkPanel">
+              <div class="monitor-link-panel-head">
+                <strong>新链接队列</strong>
+                <div class="monitor-link-panel-actions">
+                  <span id="monitorLinkPanelSummary">0 条</span>
+                  <button id="clearMonitorQueueBtn" class="danger compact-button" type="button">清空队列</button>
+                </div>
+              </div>
+              <div id="monitorLinkList" class="monitor-link-list"></div>
+              <div class="monitor-link-pager hidden" id="monitorLinkPager">
+                <button id="monitorLinkFirstPageBtn" type="button">首页</button>
+                <button id="monitorLinkPrevPageBtn" type="button">上一页</button>
+                <select id="monitorLinkPageSelect" aria-label="选择新链接队列页码"></select>
+                <button id="monitorLinkNextPageBtn" type="button">下一页</button>
+              </div>
+            </div>
+          </div>
+          <div class="form-mode-panel hidden" data-form-mode-panel="manual advanced">
+            <div class="manual-monitor-tools" data-form-regular-only>
+              <button id="importMonitorLinksBtn" type="button">同步监控队列</button>
+              <button id="fillMonitorLinksBtn" class="primary" type="button">处理监控队列</button>
+            </div>
+            <label>腾讯文档表单链接</label>
+            <textarea id="formUrl" placeholder="可粘贴多条腾讯文档表单链接，每行一条"></textarea>
+            <div class="batch-preview" id="batchPreview">
+              <div class="batch-preview-head">
+                <strong>链接整理</strong>
+                <span id="batchSummary">0 条链接</span>
+              </div>
+              <div id="batchList" class="batch-list"></div>
+            </div>
+            <div class="hidden">
+              <label>匹配方式</label>
+              <select id="douyinSelect"></select>
+            </div>
+            <div class="row hidden" data-form-advanced-only>
+              <label class="check">
+                <input id="dryRun" type="checkbox">
+                识别测试
+              </label>
+            </div>
+            <div class="fill-actions">
+              <button class="primary" id="fillBtn">开始补填</button>
+              <button class="danger" id="stopFillInlineBtn" type="button" disabled>中止填表</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" data-view="monitor">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>监控概览</h2>
+            <span id="monitorStatus">已停止</span>
+          </div>
+          <div class="monitor-overview-head">
+            <div class="monitor-summary" id="monitorSummary">0 个监控窗口</div>
+            <div class="monitor-actions">
+              <button class="primary compact-primary" id="openMonitorBoardBtn">管理监控窗口</button>
+              <button id="startMonitorBtn">恢复监控</button>
+              <button id="stopMonitorBtn">暂停监控</button>
+            </div>
+          </div>
+          <div class="monitor-mode-bar">
+            <label>
+              <span>读取方式</span>
+              <select id="monitorReadMode">
+                <option value="ocr">Paddle OCR</option>
+                <option value="local">微信本地</option>
+              </select>
+            </label>
+            <span id="monitorReadModeHint">适合日常监控</span>
+          </div>
+          <div class="monitor-kpi-grid">
+            <div class="monitor-kpi">
+              <span>监控窗口</span>
+              <strong id="monitorMetricAccounts">0</strong>
+            </div>
+            <div class="monitor-kpi">
+              <span>固定窗口</span>
+              <strong id="monitorMetricWindows">0</strong>
+            </div>
+            <div class="monitor-kpi">
+              <span>待处理链接</span>
+              <strong id="monitorMetricPending">0</strong>
+            </div>
+            <div class="monitor-kpi">
+              <span>今日新增链接</span>
+              <strong id="monitorMetricToday">0</strong>
+            </div>
+          </div>
+          <div class="monitor-live" id="monitorLiveStatus">正在读取监控状态。</div>
+          <div class="monitor-board overview-board">
+            <section class="monitor-board-section">
+              <div class="board-title">
+                <strong>最近采集</strong>
+                <span>只显示结果</span>
+              </div>
+              <div id="monitorSourceList" class="monitor-result-list"></div>
+            </section>
+            <section class="monitor-board-section">
+              <div class="board-title">
+                <strong>窗口状态</strong>
+                <span>异常优先</span>
+              </div>
+              <div id="monitorProbeResult" class="monitor-alert-list"></div>
+            </section>
+          </div>
+          <div class="hidden">
+            <select id="monitorAccountSelect"></select>
+            <button id="probeMonitorBtn">识别可添加窗口</button>
+            <label class="check">
+              <input id="monitorWechatWindow" type="checkbox" checked>
+              微信窗口
+            </label>
+            <label class="check">
+              <input id="monitorClipboard" type="checkbox" checked>
+              剪贴板
+            </label>
+            <input id="monitorSourceName">
+            <button id="saveMonitorBtn">保存</button>
+            <button id="addMonitorSourceBtn">添加到监控列表</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" data-view="history">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>历史记录</h2>
+            <div class="status-actions">
+              <button id="exportTodayFilledBtn" type="button">导出今日成功记录</button>
+              <button id="refreshHistoryBtn">刷新</button>
+            </div>
+          </div>
+          <div class="history-filter">
+            <div class="history-filter-tabs">
+              <button data-history-range="1h" type="button">近1小时</button>
+              <button data-history-range="3h" type="button">近3小时</button>
+              <button class="active" data-history-range="today" type="button">今天</button>
+              <button data-history-range="yesterday" type="button">昨天</button>
+              <button data-history-range="7d" type="button">近7天</button>
+              <button data-history-range="30d" type="button">近30天</button>
+              <button data-history-range="all" type="button">全部</button>
+            </div>
+            <div class="history-date-filter">
+              <label>
+                <span>开始时间</span>
+                <input id="historyStartDate" type="datetime-local">
+              </label>
+              <label>
+                <span>结束时间</span>
+                <input id="historyEndDate" type="datetime-local">
+              </label>
+              <button id="historyApplyDateBtn" type="button">按时间筛选</button>
+            </div>
+            <div class="history-type-filter" aria-label="选择历史记录范围">
+              <span>记录范围</span>
+              <button class="active" data-history-type="submitted" type="button">成功记录</button>
+              <button data-history-type="all" type="button">全部明细</button>
+            </div>
+            <div class="history-filter-summary" id="historyFilterSummary">今天</div>
+          </div>
+          <div class="history-quick-summary" id="historyQuickSummary"></div>
+          <div id="historyList" class="history-list"></div>
+          <div class="history-pager hidden" id="historyPager">
+            <button id="historyFirstPageBtn" type="button">首页</button>
+            <button id="historyPrevPageBtn" type="button">上一页</button>
+            <select id="historyPageSelect" aria-label="选择历史记录页码"></select>
+            <button id="historyNextPageBtn" type="button">下一页</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" data-view="accounts">
+        <div class="panel">
+        <div class="panel-head">
+          <h2>填表资料</h2>
+          <span id="accountCount">0 个账号</span>
+        </div>
+        <div id="templateAccountList" class="template-account-list"></div>
+        <div class="account-login-section">
+          <div class="account-section-head">
+            <strong>腾讯文档登录</strong>
+            <button id="checkAllLoginBtn" type="button">检测全部</button>
+          </div>
+          <div class="login-status-summary" id="loginStatusSummary">等待检测</div>
+          <div id="loginStatusList" class="login-status-list"></div>
+        </div>
+        <div class="template-edit-status" id="accountEditStatus">选择一个微信号后编辑</div>
+        <label>微信名称</label>
+        <div class="inline-form compact-inline">
+          <input id="accountNameInput" placeholder="例如：微信1">
+          <button id="renameAccountBtn">改名称</button>
+        </div>
+        <div class="form-grid two">
+          <div>
+            <label>手机号</label>
+            <input id="contactPhone" placeholder="手机号">
+          </div>
+          <div>
+            <label>姓名</label>
+            <input id="contactName" placeholder="真实姓名">
+          </div>
+          <div>
+            <label>支付宝账号</label>
+            <input id="contactAlipayAccount" placeholder="支付宝账号">
+          </div>
+          <div>
+            <label>支付宝姓名</label>
+            <input id="contactAlipayName" placeholder="支付宝姓名">
+          </div>
+          <div class="span-two">
+            <label>身份证号</label>
+            <input id="contactIdCard" placeholder="身份证号">
+          </div>
+          <div>
+            <label>发布链接</label>
+            <input id="accountReleaseLink" placeholder="默认填：好">
+          </div>
+          <div>
+            <label>等级</label>
+            <input id="accountLevel" placeholder="默认填：好">
+          </div>
+          <div class="span-two">
+            <label>截图</label>
+            <div class="inline-form compact-inline account-image-picker">
+              <input id="accountGradeScreenshot" placeholder="给这个微信号绑定一张截图，两个截图题都会提交它">
+              <button id="pickGradeScreenshotBtn" type="button">选择图片</button>
+            </div>
+          </div>
+        </div>
+        <button id="saveAccountBtn">保存填表资料</button>
+        <div class="inline-form">
+          <input id="newAccountName" placeholder="例如：微信2">
+          <button id="addAccountBtn">新增微信号</button>
+        </div>
+        <button class="primary" id="loginBtn">打开登录窗口</button>
+        </div>
+      </section>
+
+      <section class="page" data-view="content">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>抖音账号库</h2>
+            <span id="douyinEditStatus">抖音账号库</span>
+          </div>
+          <label>归属微信号</label>
+          <select id="douyinAccountOwner"></select>
+          <div class="form-grid two">
+            <input id="douyinName" placeholder="抖音昵称，例如：金铲铲">
+            <input id="douyinId" placeholder="抖音ID，例如：36592513379">
+          </div>
+          <div class="track-picker-block">
+            <label>这个抖音号可做的赛道</label>
+            <div id="douyinTrackPicker" class="track-picker"></div>
+          </div>
+          <div class="button-row">
+            <button id="addDouyinBtn">添加抖音号</button>
+            <button id="cancelDouyinEditBtn" class="ghost hidden">取消编辑</button>
+          </div>
+          <div id="douyinList" class="account-list"></div>
+          <div class="track-editor">
+            <div class="track-editor-head">
+              <strong>赛道设定</strong>
+            </div>
+            <div id="trackLibraryList" class="track-library-list"></div>
+            <div class="inline-form compact-inline">
+              <input id="newTrackName" placeholder="新增赛道，例如：哪吒">
+              <button id="addTrackBtn" type="button">添加赛道</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" data-view="status">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>运行状态</h2>
+            <div class="status-actions">
+              <button class="danger" id="stopFillBtn" type="button" disabled>停止填表</button>
+              <button id="refreshBtn" type="button">刷新</button>
+            </div>
+          </div>
+          <div class="job-line">
+            <span>任务：</span>
+            <strong id="jobState">暂无</strong>
+          </div>
+          <pre id="logBox">就绪</pre>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

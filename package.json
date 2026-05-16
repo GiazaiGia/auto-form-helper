@@ -1,0 +1,96 @@
+{
+  "name": "auto-form-helper",
+  "version": "0.1.15",
+  "private": true,
+  "description": "Windows local tool for monitoring WeChat form links and filling Tencent Docs forms.",
+  "main": "src/electron-main.js",
+  "scripts": {
+    "app": "node src/app-server.js",
+    "desktop": "electron .",
+    "dist": "electron-builder --win nsis",
+    "fill": "node src/fill-qq-form.js",
+    "watch": "node src/watch-clipboard.js"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3",
+    "playwright": "^1.57.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3",
+    "sharp": "^0.34.5"
+  },
+  "build": {
+    "appId": "com.local.jianyingBatchDraftTool",
+    "productName": "自动填表助手",
+    "artifactName": "auto-form-helper-setup-${version}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "assets/**/*",
+      "scripts/**/*",
+      "src/**/*",
+      "ui/**/*",
+      "config/update.json",
+      "node_modules/electron-updater/**/*",
+      "node_modules/builder-util-runtime/**/*",
+      "node_modules/fs-extra/**/*",
+      "node_modules/js-yaml/**/*",
+      "node_modules/lazy-val/**/*",
+      "node_modules/lodash.escaperegexp/**/*",
+      "node_modules/lodash.isequal/**/*",
+      "node_modules/tiny-typed-emitter/**/*",
+      "node_modules/semver/**/*",
+      "node_modules/debug/**/*",
+      "node_modules/ms/**/*",
+      "node_modules/sax/**/*",
+      "node_modules/graceful-fs/**/*",
+      "node_modules/jsonfile/**/*",
+      "node_modules/universalify/**/*",
+      "node_modules/playwright/**/*",
+      "node_modules/playwright-core/**/*",
+      "node_modules/adler-32/**/*",
+      "node_modules/cfb/**/*",
+      "node_modules/codepage/**/*",
+      "node_modules/crc-32/**/*",
+      "node_modules/frac/**/*",
+      "node_modules/ssf/**/*",
+      "node_modules/wmf/**/*",
+      "node_modules/word/**/*",
+      "node_modules/xlsx/**/*",
+      "package.json",
+      "README.md"
+    ],
+    "extraResources": [
+      {
+        "from": "tools",
+        "to": "tools",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "config/update.json",
+        "to": "config/update.json"
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "GiazaiGia",
+        "repo": "auto-form-helper"
+      }
+    ]
+  }
+}

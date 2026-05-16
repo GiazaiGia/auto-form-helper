@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>微信监控台</title>
+  <link rel="stylesheet" href="/monitor-platform.css">
+</head>
+<body>
+  <main class="platform">
+    <header class="platform-head">
+      <div class="brand">
+        <h1>微信监控台</h1>
+        <p id="summaryText">正在加载</p>
+      </div>
+      <div class="head-actions">
+        <button id="scanWindowsBtn">扫描窗口</button>
+        <button id="recoverWindowsBtn">找回独立窗口</button>
+        <button id="pauseBtn">暂停监控</button>
+      </div>
+    </header>
+
+    <section class="account-bar">
+      <div class="account-label">
+        <span>监控范围</span>
+        <strong id="selectedAccountName">未选择</strong>
+      </div>
+      <div id="accountTabs" class="account-tabs" aria-label="监控窗口状态"></div>
+    </section>
+
+    <section class="settings-panel" id="settingsPanel">
+      <div class="settings-grid">
+        <label class="setting-field">
+          <span>监控速度</span>
+          <select id="scanPresetSelect">
+            <option value="stable">稳定 30秒</option>
+            <option value="balanced">均衡 15秒</option>
+            <option value="fast">快速 5秒</option>
+          </select>
+        </label>
+        <label class="setting-field">
+          <span>读取方式</span>
+          <select id="readModeSelect">
+            <option value="ocr">Paddle OCR</option>
+            <option value="local">微信本地</option>
+          </select>
+        </label>
+        <div id="settingsHint" class="settings-hint">均衡</div>
+        <button id="saveSettingsBtn" class="primary">保存设置</button>
+      </div>
+    </section>
+
+    <section class="lock-zone" id="lockZone" tabindex="0" role="button">
+      <div class="lock-plus">+</div>
+      <div class="lock-copy">
+        <strong>添加监控窗口</strong>
+        <span id="lockHint">点击后选择微信独立聊天窗口</span>
+      </div>
+      <div class="lock-badge" id="lockBadge">锁定后自动监控</div>
+    </section>
+
+    <section class="layout">
+      <div class="workspace">
+        <div class="section-title">
+          <strong>窗口状态</strong>
+          <span>全部窗口</span>
+        </div>
+        <div id="gridList" class="account-lanes"></div>
+      </div>
+
+      <aside class="side-panel">
+        <div class="side-block" id="availableBlock">
+          <div class="section-title">
+            <strong>扫描结果</strong>
+            <span>未接入窗口</span>
+          </div>
+          <div id="availableList" class="available-list"></div>
+        </div>
+
+        <div class="side-block">
+          <div class="section-title">
+            <strong>新链接队列</strong>
+            <div class="title-actions">
+              <span id="syncQueueStatus">同步未开启</span>
+              <button id="syncQueueBtn" type="button">开始同步</button>
+              <button id="clearSelectedEventsBtn" type="button">清除选中</button>
+              <button id="clearEventsBtn" type="button">清空队列</button>
+            </div>
+          </div>
+          <div id="eventList" class="event-list"></div>
+          <div id="eventPager" class="queue-pager" hidden>
+            <button id="eventPrevBtn" type="button">上一页</button>
+            <span id="eventPageInfo">第 1/1 页</span>
+            <label>
+              <span>每页</span>
+              <select id="eventPageSizeSelect">
+                <option value="10">10 条</option>
+                <option value="20">20 条</option>
+              </select>
+            </label>
+            <button id="eventNextBtn" type="button">下一页</button>
+          </div>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <div class="lock-overlay" id="lockOverlay" hidden>
+    <div class="lock-panel">
+      <div class="countdown" id="lockCount">5</div>
+      <strong id="lockTitle">准备锁定窗口</strong>
+      <span id="lockMessage">请点击目标微信独立聊天窗口</span>
+    </div>
+  </div>
+
+  <script src="/monitor-platform.js"></script>
+</body>
+</html>
