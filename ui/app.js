@@ -14,6 +14,8 @@ let historyTypeFilter = "submitted";
 let historyPage = 1;
 let monitorLinkPage = 1;
 let formMode = "auto";
+let advancedTestMode = "manual";
+const selectedHistoryIds = new Set();
 let parsedBatchItems = [];
 let batchTrackDetectTimer = null;
 let batchTrackDetectSeq = 0;
@@ -93,6 +95,9 @@ const jobState = document.querySelector("#jobState");
 const typeList = document.querySelector("#typeList");
 const manualSubmitMode = document.querySelector("#manualSubmitMode");
 const autoSubmitMode = document.querySelector("#autoSubmitMode");
+const manualTestMode = document.querySelector("#manualTestMode");
+const autoTestMode = document.querySelector("#autoTestMode");
+const testSyncHistory = document.querySelector("#testSyncHistory");
 const monitorStatus = document.querySelector("#monitorStatus");
 const monitorWechatWindow = document.querySelector("#monitorWechatWindow");
 const monitorClipboard = document.querySelector("#monitorClipboard");
@@ -131,6 +136,8 @@ const historyFirstPageBtn = document.querySelector("#historyFirstPageBtn");
 const historyPrevPageBtn = document.querySelector("#historyPrevPageBtn");
 const historyPageSelect = document.querySelector("#historyPageSelect");
 const historyNextPageBtn = document.querySelector("#historyNextPageBtn");
+const historySelectAll = document.querySelector("#historySelectAll");
+const deleteSelectedHistoryBtn = document.querySelector("#deleteSelectedHistoryBtn");
 const loginStatusSummary = document.querySelector("#loginStatusSummary");
 const loginStatusList = document.querySelector("#loginStatusList");
 const checkAllLoginBtn = document.querySelector("#checkAllLoginBtn");
@@ -196,12 +203,18 @@ function renderFormMode() {
   formAdvancedOnlyBlocks.forEach((block) => {
     block.classList.toggle("hidden", formMode !== "advanced");
   });
+  if (manualTestMode && autoTestMode) {
+    manualTestMode.classList.toggle("active", advancedTestMode === "manual");
+    autoTestMode.classList.toggle("active", advancedTestMode === "auto");
+  }
   if (dryRun) {
-    dryRun.checked = formMode === "advanced";
+    dryRun.checked = formMode === "advanced" && advancedTestMode === "manual";
     dryRun.disabled = formMode === "advanced";
   }
   if (fillBtn) {
-    fillBtn.textContent = formMode === "advanced" ? "开始测试" : "开始补填";
+    fillBtn.textContent = formMode === "advanced"
+      ? advancedTestMode === "auto" ? "开始自动提交测试" : "开始手动提交测试"
+      : "开始补填";
   }
 }
 
@@ -2677,11 +2690,18 @@ function renderHistory() {
   renderMonitorImportSummary();
   const timeItems = primaryHistoryItems(historyTimeFilteredItems());
   const visibleItems = primaryHistoryItems(filteredHistoryItems());
+  const visibleIds = new Set(visibleItems.map((item) => String(item.id || "")).filter(Boolean));
+  for (const id of Array.from(selectedHistoryIds)) {
+    if (!visibleIds.has(id)) {
+      selectedHistoryIds.delete(id);
+    }
+  }
   const pageCount = Math.max(1, Math.ceil(visibleItems.length / historyPageSize));
   historyPage = Math.min(Math.max(historyPage, 1), pageCount);
   const pageStart = (historyPage - 1) * historyPageSize;
   const pageItems = visibleItems.slice(pageStart, pageStart + historyPageSize);
   renderHistoryFilterState(visibleItems.length, timeItems.length);
+  renderHistorySelection(visibleItems);
   if (historyQuickSummary) {
     historyQuickSummary.classList.toggle("hidden", historyTypeFilter !== "all");
   }
@@ -2712,6 +2732,9 @@ function renderHistory() {
     const timeText = formatTime(item.filledAt || item.updatedAt || item.createdAt);
     row.innerHTML = `
       <div class="history-status">
+        <label class="history-select check">
+          <input type="checkbox" data-select-history="${item.id}">
+        </label>
         <span class="badge"></span>
         <time></time>
       </div>
@@ -2735,6 +2758,8 @@ function renderHistory() {
       </div>
     `;
     const badge = row.querySelector(".badge");
+    const selectBox = row.querySelector("[data-select-history]");
+    selectBox.checked = selectedHistoryIds.has(String(item.id || ""));
     badge.className = `badge ${statusClass(badgeStatus)}`;
     badge.textContent = badgeStatus;
     row.querySelector("time").textContent = timeText || "--";
@@ -2766,6 +2791,21 @@ function renderHistory() {
     submitButton.classList.toggle("hidden", status !== "待提交");
     historyList.appendChild(row);
   }
+}
+
+function renderHistorySelection(visibleItems = []) {
+  if (!historySelectAll || !deleteSelectedHistoryBtn) {
+    return;
+  }
+  const visibleIds = visibleItems.map((item) => String(item.id || "")).filter(Boolean);
+  const selectedVisibleCount = visibleIds.filter((id) => selectedHistoryIds.has(id)).length;
+  historySelectAll.disabled = !visibleIds.length;
+  historySelectAll.checked = Boolean(visibleIds.length && selectedVisibleCount === visibleIds.length);
+  historySelectAll.indeterminate = Boolean(selectedVisibleCount && selectedVisibleCount < visibleIds.length);
+  deleteSelectedHistoryBtn.disabled = selectedHistoryIds.size === 0;
+  deleteSelectedHistoryBtn.textContent = selectedHistoryIds.size
+    ? `删除选中 ${selectedHistoryIds.size} 条`
+    : "删除选中";
 }
 
 function renderHistoryQuickSummary(items = []) {
@@ -3540,6 +3580,23 @@ async function markHistorySubmitted(id) {
   await loadHistory();
 }
 
+async function deleteSelectedHistory() {
+  const ids = Array.from(selectedHistoryIds).filter(Boolean);
+  if (!ids.length) {
+    return;
+  }
+  if (!confirm(`确定删除选中的 ${ids.length} 条历史记录吗？`)) {
+    return;
+  }
+  const result = await api("/api/history/delete", {
+    method: "POST",
+    body: JSON.stringify({ ids })
+  });
+  selectedHistoryIds.clear();
+  setPageStatus(`已删除 ${result.deleted || ids.length} 条历史记录`);
+  await loadHistory();
+}
+
 async function openHistoryScreenshot(path) {
   if (!path) {
     alert("这条记录还没有填写截图");
@@ -3695,6 +3752,9 @@ async function startFill() {
   const url = formUrl.value.trim();
   renderBatchPreview();
   const items = batchItemsForSubmit();
+  const isAdvancedMode = formMode === "advanced";
+  const isManualTest = isAdvancedMode && advancedTestMode === "manual";
+  const isAutoSubmitTest = isAdvancedMode && advancedTestMode === "auto";
   if (!targetAccounts.length) {
     alert("先选择参与填表的微信号");
     return;
@@ -3703,7 +3763,7 @@ async function startFill() {
     alert("先粘贴表单链接");
     return;
   }
-  if (!dryRun.checked) {
+  if (!isManualTest) {
     const selectedMatchMode = douyinSelect.value || "__auto__";
     for (const accountName of targetAccounts) {
       const accountData = accountByName(accountName);
@@ -3729,16 +3789,29 @@ async function startFill() {
       }
     }
   }
-  const isTestRun = dryRun.checked;
-  setLog(isTestRun ? "正在启动测试..." : "正在启动自动填表...");
-  if (!isTestRun) {
+  const isTestRun = isManualTest;
+  const shouldShowFillWindow = isAutoSubmitTest || (!isTestRun && state && state.autoSubmit === true);
+  setLog(isAutoSubmitTest ? "正在启动自动提交测试..." : isTestRun ? "正在启动手动提交测试..." : "正在启动自动填表...");
+  if (!isTestRun && !shouldShowFillWindow) {
     showPage("status");
+  } else if (shouldShowFillWindow) {
+    setPageStatus("正在打开可视化填表窗口");
   } else {
     setPageStatus("测试已开始，结果会留在当前页和运行状态里");
   }
   const result = await api("/api/fill", {
     method: "POST",
-    body: JSON.stringify({ account, accounts: targetAccounts, url, items, dryRun: isTestRun, douyinIndex: douyinSelect.value || "__auto__" })
+    body: JSON.stringify({
+      account,
+      accounts: targetAccounts,
+      url,
+      items,
+      dryRun: isTestRun,
+      visible: shouldShowFillWindow,
+      forceAutoSubmit: isAutoSubmitTest,
+      skipHistory: isAdvancedMode && !(testSyncHistory && testSyncHistory.checked),
+      douyinIndex: douyinSelect.value || "__auto__"
+    })
   });
   if (result.count > 1) {
     const skippedText = result.skipped && result.skipped.length ? `，跳过 ${result.skipped.length} 条已处理链接` : "";
@@ -3821,6 +3894,18 @@ if (manualSubmitMode) {
 }
 if (autoSubmitMode) {
   autoSubmitMode.addEventListener("click", () => setSubmitMode(true).catch((error) => alert(error.message)));
+}
+if (manualTestMode) {
+  manualTestMode.addEventListener("click", () => {
+    advancedTestMode = "manual";
+    renderFormMode();
+  });
+}
+if (autoTestMode) {
+  autoTestMode.addEventListener("click", () => {
+    advancedTestMode = "auto";
+    renderFormMode();
+  });
 }
 monitorAccountSelect.addEventListener("change", () => {
   monitorAccountSelect.dataset.userSelected = "1";
@@ -3971,6 +4056,37 @@ historyList.addEventListener("click", (event) => {
     markHistorySubmitted(submitButton.dataset.submitHistory).catch((error) => alert(error.message));
   }
 });
+historyList.addEventListener("change", (event) => {
+  const input = event.target.closest("[data-select-history]");
+  if (!input) {
+    return;
+  }
+  const id = String(input.dataset.selectHistory || "");
+  if (!id) {
+    return;
+  }
+  if (input.checked) {
+    selectedHistoryIds.add(id);
+  } else {
+    selectedHistoryIds.delete(id);
+  }
+  renderHistory();
+});
+if (historySelectAll) {
+  historySelectAll.addEventListener("change", () => {
+    const visibleItems = primaryHistoryItems(filteredHistoryItems());
+    const visibleIds = visibleItems.map((item) => String(item.id || "")).filter(Boolean);
+    if (historySelectAll.checked) {
+      visibleIds.forEach((id) => selectedHistoryIds.add(id));
+    } else {
+      visibleIds.forEach((id) => selectedHistoryIds.delete(id));
+    }
+    renderHistory();
+  });
+}
+if (deleteSelectedHistoryBtn) {
+  deleteSelectedHistoryBtn.addEventListener("click", () => deleteSelectedHistory().catch((error) => alert(error.message)));
+}
 if (monitorLinkList) {
   monitorLinkList.addEventListener("click", (event) => {
     const shotButton = event.target.closest("[data-open-history-shot]");

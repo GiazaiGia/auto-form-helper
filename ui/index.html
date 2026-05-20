@@ -99,10 +99,16 @@
               <select id="douyinSelect"></select>
             </div>
             <div class="row hidden" data-form-advanced-only>
-              <label class="check">
-                <input id="dryRun" type="checkbox">
-                识别测试
+              <label>测试方式</label>
+              <div class="mode-switch submit-mode-switch test-mode-switch">
+                <button id="manualTestMode" class="mode-btn" type="button">手动提交测试</button>
+                <button id="autoTestMode" class="mode-btn" type="button">自动提交测试</button>
+              </div>
+              <label class="check test-history-sync">
+                <input id="testSyncHistory" type="checkbox">
+                同步到历史记录
               </label>
+              <input id="dryRun" type="checkbox" hidden>
             </div>
             <div class="fill-actions">
               <button class="primary" id="fillBtn">开始补填</button>
@@ -225,6 +231,13 @@
               <button data-history-type="all" type="button">全部明细</button>
             </div>
             <div class="history-filter-summary" id="historyFilterSummary">今天</div>
+          </div>
+          <div class="history-selection-bar">
+            <label class="check">
+              <input id="historySelectAll" type="checkbox">
+              全选当前筛选
+            </label>
+            <button id="deleteSelectedHistoryBtn" class="danger" type="button" disabled>删除选中</button>
           </div>
           <div class="history-quick-summary" id="historyQuickSummary"></div>
           <div id="historyList" class="history-list"></div>

@@ -274,6 +274,13 @@ function getSelectedDouyin(account, douyinIndex) {
   return (account.douyinAccounts || [])[index] || null;
 }
 
+function parseDouyinIndexesArg(value) {
+  return uniqueCleanList(String(value || "")
+    .split(/[,\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean));
+}
+
 function pickDouyinForPage(pageText, account, config) {
   const douyins = account && account.douyinAccounts || [];
   if (!douyins.length) {
@@ -305,6 +312,29 @@ function pickDouyinForExpectedTrack(account, expectedTrack, config) {
     }
   }
   return { douyin: null, index: -1, pickedType: { typeName: "", score: 0, source: "none" }, tracks: [] };
+}
+
+function matchingDouyinIndexesForExpectedTrack(account, expectedTrack, config) {
+  if (!account || !expectedTrack) {
+    return [];
+  }
+  const indexes = [];
+  const douyins = account.douyinAccounts || [];
+  for (let index = 0; index < douyins.length; index += 1) {
+    const tracks = trackListForDouyin(douyins[index]);
+    if (tracks.some((track) => trackMatches(expectedTrack, track, config))) {
+      indexes.push(String(index));
+    }
+  }
+  return indexes;
+}
+
+function douyinLabelForIndex(account, douyinIndex) {
+  const douyin = getSelectedDouyin(account, douyinIndex);
+  if (!douyin) {
+    return `第 ${Number(douyinIndex) + 1} 个抖音号`;
+  }
+  return `${douyin.nickname || "未命名"} / ${douyin.douyinId || "无ID"}`;
 }
 
 function mergeAccountAnswers(answers, account, douyin) {
@@ -416,15 +446,26 @@ function imageForLabel(label, answers) {
 async function waitUntilEditable(page, log = console.log, signal = null, options = {}) {
   const startedAt = Date.now();
   let lastMessage = "";
+  let fillAgainAttempts = 0;
   while (Date.now() - startedAt < 10 * 60 * 1000) {
     throwIfAborted(signal);
     const state = await page.evaluate(() => {
       const bodyText = document.body ? document.body.innerText || "" : "";
-      const textareas = Array.from(document.querySelectorAll("textarea"));
-      const editableCount = textareas.filter((item) => !item.disabled && !item.readOnly).length;
-      const closedTerms = [
+      const pageUrl = window.location.href || "";
+      const fields = Array.from(document.querySelectorAll("textarea, input")).filter((element) => {
+        const tagName = String(element.tagName || "").toLowerCase();
+        const type = String(element.type || "").toLowerCase();
+        return tagName === "textarea"
+          || tagName === "input" && (!type || ["text", "number", "tel", "url", "search"].includes(type));
+      });
+      const editableCount = fields.filter((item) => !item.disabled && !item.readOnly).length;
+      const submittedTerms = [
         "你已提交",
         "已提交1份",
+        "提交成功",
+        "提交完成"
+      ];
+      const closedTerms = [
         "已暂停收集",
         "暂停收集",
         "已达收集上限",
@@ -434,15 +475,36 @@ async function waitUntilEditable(page, log = console.log, signal = null, options
         "已结束",
         "收集已结束"
       ];
+      const submittedReason = editableCount === 0 ? submittedTerms.find((term) => bodyText.includes(term)) || "" : "";
       const closedReason = closedTerms.find((term) => bodyText.includes(term)) || "";
       return {
         loginRequired: bodyText.includes("登录腾讯文档") || bodyText.includes("登录后才能填写"),
-        textareaCount: textareas.length,
+        textareaCount: fields.length,
         editableCount,
+        submittedReason,
+        submittedByUrl: /#\/submit-result(?:\?|$)/.test(pageUrl)
+          || /#\/fill-detail(?:\?|$)/.test(pageUrl) && editableCount === 0,
+        hasFillAgainText: editableCount === 0 && /再[填添](?:一份|一次|一遍)|再次填写|继续填写|重新填写/.test(bodyText),
         closedReason,
         preview: bodyText.replace(/\s+/g, " ").trim().slice(0, 240)
       };
     });
+
+    if (state.submittedReason || state.submittedByUrl || state.hasFillAgainText) {
+      fillAgainAttempts += 1;
+      if (fillAgainAttempts > 3) {
+        throw new Error(`这个表单已经提交过，但多次点击“再填一份”后仍未进入填写页：${state.submittedReason || "已提交页面"}`);
+      }
+      if (await clickFillAgainButton(page, log, signal)) {
+        const fresh = await waitForFreshFillPage(page, signal);
+        if (!fresh) {
+          throw new Error("点击“再填一份”后仍未进入新的填写页");
+        }
+        lastMessage = "";
+        continue;
+      }
+      throw new Error(`这个表单已经提交过，但没有找到“再填一份”按钮：${state.submittedReason || "已提交页面"}`);
+    }
 
     if (state.textareaCount > 0 && state.editableCount > 0) {
       return state;
@@ -499,8 +561,38 @@ async function collectTextFields(page) {
       return clean(element.placeholder || "");
     }
 
-    return Array.from(document.querySelectorAll("textarea")).map((element, index) => ({
+    function isTextInput(element) {
+      const tagName = String(element.tagName || "").toLowerCase();
+      const type = String(element.type || "").toLowerCase();
+      if (tagName === "textarea") {
+        return true;
+      }
+      if (tagName !== "input") {
+        return false;
+      }
+      return !type || ["text", "number", "tel", "url", "search"].includes(type);
+    }
+
+    const fields = Array.from(document.querySelectorAll("textarea, input"))
+      .filter((element) => {
+        if (!isTextInput(element)) {
+          return false;
+        }
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0
+          && rect.height > 0
+          && style.visibility !== "hidden"
+          && style.display !== "none";
+      });
+
+    fields.forEach((element, index) => {
+      element.setAttribute("data-auto-text-index", String(index));
+    });
+
+    return fields.map((element, index) => ({
       index,
+      selector: `[data-auto-text-index="${index}"]`,
       label: fieldTextFor(element),
       disabled: element.disabled,
       readOnly: element.readOnly,
@@ -521,7 +613,7 @@ async function fillTextFields(page, answers) {
       continue;
     }
 
-    const locator = page.locator("textarea").nth(field.index);
+    const locator = page.locator(field.selector || "textarea").first();
     if (!(await locator.isEnabled().catch(() => false))) {
       skipped.push({ index: field.index + 1, label: field.label, reason: "不可填写" });
       continue;
@@ -536,7 +628,25 @@ async function fillTextFields(page, answers) {
     });
   }
 
-  return { filled, skipped };
+  return { filled, skipped, totalCount: fields.length };
+}
+
+async function fillTextFieldsWithRetry(page, answers, log = console.log, signal = null) {
+  let lastResult = { filled: [], skipped: [], totalCount: 0 };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    throwIfAborted(signal);
+    lastResult = await fillTextFields(page, answers);
+    if (lastResult.filled.length > 0) {
+      return lastResult;
+    }
+    if (attempt < 2) {
+      log(lastResult.totalCount > 0
+        ? "表单字段已经出现，但还没识别到可填写内容，稍等后重试。"
+        : "正在等待表单字段加载完整...");
+      await abortableWait(page, 2500, signal);
+    }
+  }
+  return lastResult;
 }
 
 async function collectUploadFields(page) {
@@ -658,6 +768,142 @@ async function uploadImages(page, answers, signal = null) {
   return { uploaded, skipped };
 }
 
+async function clickFillAgainButton(page, log = console.log, signal = null) {
+  throwIfAborted(signal);
+  const repeatButtonText = /再[填添](?:一份|一次|一遍)|再次填写|继续填写|重新填写/;
+  const buttons = page.locator("button, [role='button'], a").filter({ hasText: repeatButtonText });
+  const count = await buttons.count().catch(() => 0);
+
+  for (let index = 0; index < count; index += 1) {
+    const button = buttons.nth(index);
+    const visible = await button.isVisible().catch(() => false);
+    const enabled = await button.isEnabled().catch(() => true);
+    if (!visible || !enabled) {
+      continue;
+    }
+    log("检测到这个微信号已提交过，正在点击“再填一份”。");
+    await button.click({ timeout: 10000 });
+    await abortableWait(page, 3000, signal);
+    return true;
+  }
+
+  const rect = await page.evaluate(() => {
+    const repeatPattern = /再[填添](?:一份|一次|一遍)|再次填写|继续填写|重新填写/;
+    const candidates = Array.from(document.querySelectorAll("button, [role='button'], a, div, span"))
+      .map((element) => {
+        const text = String(element.innerText || element.textContent || "").replace(/\s+/g, " ").trim();
+        if (!repeatPattern.test(text) || text.length > 24) {
+          return null;
+        }
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        if (!(rect.width > 0
+          && rect.height > 0
+          && style.visibility !== "hidden"
+          && style.display !== "none"
+          && style.pointerEvents !== "none")) {
+          return null;
+        }
+        return {
+          element,
+          area: rect.width * rect.height,
+          y: rect.top,
+          x: rect.left
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.area - b.area || b.y - a.y || a.x - b.x);
+    const target = candidates[0] && candidates[0].element;
+    if (!target) {
+      return null;
+    }
+    target.scrollIntoView({ block: "center", inline: "center" });
+    const rect = target.getBoundingClientRect();
+    return {
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2
+    };
+  }).catch(() => false);
+  if (rect && Number.isFinite(rect.x) && Number.isFinite(rect.y)) {
+    log("检测到这个微信号已提交过，正在点击“再填一份”。");
+    await page.mouse.click(rect.x, rect.y);
+    await abortableWait(page, 3000, signal);
+    return true;
+  }
+
+  return false;
+}
+
+async function ensureFreshFillPage(page, log = console.log, signal = null) {
+  throwIfAborted(signal);
+  const state = await page.evaluate(() => {
+    const bodyText = document.body ? document.body.innerText || "" : "";
+    const pageUrl = window.location.href || "";
+    const fields = Array.from(document.querySelectorAll("textarea, input")).filter((element) => {
+      const tagName = String(element.tagName || "").toLowerCase();
+      const type = String(element.type || "").toLowerCase();
+      return tagName === "textarea"
+        || tagName === "input" && (!type || ["text", "number", "tel", "url", "search"].includes(type));
+    });
+    const editableCount = fields.filter((item) => !item.disabled && !item.readOnly).length;
+    const submittedTerms = [
+      "你已提交",
+      "已提交1份",
+      "提交成功",
+      "提交完成"
+    ];
+    return {
+      submittedReason: editableCount === 0 ? submittedTerms.find((term) => bodyText.includes(term)) || "" : "",
+      submittedByUrl: /#\/submit-result(?:\?|$)/.test(pageUrl)
+        || /#\/fill-detail(?:\?|$)/.test(pageUrl) && editableCount === 0,
+      hasFillAgainText: editableCount === 0 && /再[填添](?:一份|一次|一遍)|再次填写|继续填写|重新填写/.test(bodyText),
+      preview: bodyText.replace(/\s+/g, " ").trim().slice(0, 240)
+    };
+  });
+
+  if (!state.submittedReason && !state.submittedByUrl && !state.hasFillAgainText) {
+    return false;
+  }
+
+  if (await clickFillAgainButton(page, log, signal)) {
+    const fresh = await waitForFreshFillPage(page, signal);
+    if (!fresh) {
+      throw new Error("点击“再填一份”后仍未进入新的填写页");
+    }
+    return true;
+  }
+
+  if (state.submittedReason || state.submittedByUrl) {
+    throw new Error(`这个表单已经提交过，但没有找到“再填一份”按钮：${state.submittedReason || "已提交页面"}`);
+  }
+
+  return false;
+}
+
+async function waitForFreshFillPage(page, signal = null) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 20000) {
+    throwIfAborted(signal);
+    const ready = await page.evaluate(() => {
+      const bodyText = document.body ? document.body.innerText || "" : "";
+      const pageUrl = window.location.href || "";
+      const fields = Array.from(document.querySelectorAll("textarea, input")).filter((element) => {
+        const tagName = String(element.tagName || "").toLowerCase();
+        const type = String(element.type || "").toLowerCase();
+        return tagName === "textarea"
+          || tagName === "input" && (!type || ["text", "number", "tel", "url", "search"].includes(type));
+      });
+      const editableCount = fields.filter((item) => !item.disabled && !item.readOnly).length;
+      return editableCount > 0;
+    }).catch(() => false);
+    if (ready) {
+      return true;
+    }
+    await abortableWait(page, 1000, signal);
+  }
+  return false;
+}
+
 async function clickSubmitButton(page, log = console.log, signal = null) {
   throwIfAborted(signal);
   const buttons = page.locator("button, [role='button']").filter({ hasText: /^提交$/ });
@@ -686,6 +932,10 @@ async function clickSubmitButton(page, log = console.log, signal = null) {
   }
 
   await abortableWait(page, 3000, signal);
+  const confirmed = await clickSubmitConfirmButton(page, log, signal);
+  if (confirmed) {
+    await abortableWait(page, 3000, signal);
+  }
   const bodyText = await page.locator("body").innerText({ timeout: 10000 }).catch(() => "");
   const stillHasSubmit = await page.locator("button, [role='button']").filter({ hasText: /^提交$/ }).count().catch(() => 0);
   const success = /提交成功|已提交|你已提交|感谢填写|提交完成|收集成功/.test(bodyText);
@@ -696,6 +946,246 @@ async function clickSubmitButton(page, log = console.log, signal = null) {
 
   log("已点击提交，但没有识别到成功提示，请在历史记录里检查截图。");
   return true;
+}
+
+async function clickSubmitConfirmButton(page, log = console.log, signal = null) {
+  throwIfAborted(signal);
+  const confirmButtons = page.locator("button, [role='button'], [class*='button'], [class*='btn']").filter({ hasText: /^确认$/ });
+  const count = await confirmButtons.count().catch(() => 0);
+
+  for (let index = count - 1; index >= 0; index -= 1) {
+    const button = confirmButtons.nth(index);
+    const visible = await button.isVisible().catch(() => false);
+    const enabled = await button.isEnabled().catch(() => true);
+    if (!visible || !enabled) {
+      continue;
+    }
+    log("检测到提交确认弹窗，正在点击“确认”。");
+    await button.click({ timeout: 10000 });
+    return true;
+  }
+
+  const clickedByText = await page.evaluate(() => {
+    const candidates = Array.from(document.querySelectorAll("button, [role='button'], div, span"))
+      .filter((element) => {
+        const text = String(element.innerText || element.textContent || "").replace(/\s+/g, " ").trim();
+        if (text !== "确认") {
+          return false;
+        }
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0
+          && rect.height > 0
+          && style.visibility !== "hidden"
+          && style.display !== "none"
+          && style.pointerEvents !== "none";
+      });
+    const target = candidates[candidates.length - 1];
+    if (!target) {
+      return false;
+    }
+    target.click();
+    return true;
+  }).catch(() => false);
+
+  if (clickedByText) {
+    log("检测到提交确认弹窗，正在点击“确认”。");
+    return true;
+  }
+
+  return false;
+}
+
+async function waitForSubmittedPage(page, log = console.log, signal = null) {
+  const startedAt = Date.now();
+  let hasLogged = false;
+  while (Date.now() - startedAt < 30 * 60 * 1000) {
+    throwIfAborted(signal);
+    const state = await page.evaluate(() => {
+      const bodyText = document.body ? document.body.innerText || "" : "";
+      const pageUrl = window.location.href || "";
+      const fields = Array.from(document.querySelectorAll("textarea, input")).filter((element) => {
+        const tagName = String(element.tagName || "").toLowerCase();
+        const type = String(element.type || "").toLowerCase();
+        return tagName === "textarea"
+          || tagName === "input" && (!type || ["text", "number", "tel", "url", "search"].includes(type));
+      });
+      const editableCount = fields.filter((item) => !item.disabled && !item.readOnly).length;
+      const submittedTerms = [
+        "你已提交",
+        "已提交1份",
+        "提交成功",
+        "提交完成"
+      ];
+      return {
+        submittedReason: editableCount === 0 ? submittedTerms.find((term) => bodyText.includes(term)) || "" : "",
+        submittedByUrl: /#\/submit-result(?:\?|$)/.test(pageUrl)
+          || /#\/fill-detail(?:\?|$)/.test(pageUrl) && editableCount === 0,
+        hasFillAgainText: editableCount === 0 && /再[填添](?:一份|一次|一遍)|再次填写|继续填写|重新填写/.test(bodyText)
+      };
+    }).catch(() => ({ submittedReason: "", submittedByUrl: false, hasFillAgainText: false }));
+
+    if (state.submittedReason || state.submittedByUrl || state.hasFillAgainText) {
+      return true;
+    }
+    if (!hasLogged) {
+      log("当前号已填好。请手动提交，提交成功后我会自动点击“再填一份”继续下一个抖音号。");
+      hasLogged = true;
+    }
+    await abortableWait(page, 2000, signal);
+  }
+  throw new Error("等待手动提交超时，未能继续填写下一个抖音号");
+}
+
+async function clickFillAgainForNext(page, log = console.log, signal = null) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 30000) {
+    throwIfAborted(signal);
+    if (await clickFillAgainButton(page, log, signal)) {
+      const fresh = await waitForFreshFillPage(page, signal);
+      if (!fresh) {
+        throw new Error("点击“再填一份”后仍未进入新的填写页");
+      }
+      return true;
+    }
+    await abortableWait(page, 1000, signal);
+  }
+  throw new Error("提交后没有找到“再填一份”按钮，无法继续填写下一个抖音号");
+}
+
+async function fillOneDouyinOnCurrentPage(page, {
+  config,
+  accountName,
+  douyinIndex,
+  autoDouyin,
+  expectedTrack,
+  dryRun,
+  background,
+  forceAutoSubmit,
+  log,
+  signal
+}) {
+  await ensureFreshFillPage(page, log, signal);
+
+  if (dryRun) {
+    log("正在进行测试模式：验证字段识别、填值和图片上传，不提交。");
+    await page.evaluate(() => {
+      for (const field of document.querySelectorAll("textarea, input")) {
+        const tagName = String(field.tagName || "").toLowerCase();
+        const type = String(field.type || "").toLowerCase();
+        const isTextField = tagName === "textarea"
+          || tagName === "input" && (!type || ["text", "number", "tel", "url", "search"].includes(type));
+        if (!isTextField) {
+          continue;
+        }
+        field.disabled = false;
+        field.readOnly = false;
+        field.removeAttribute("disabled");
+        field.removeAttribute("readonly");
+      }
+    });
+  } else {
+    await maybeClickLogin(page);
+    await waitUntilEditable(page, log, signal, { background });
+  }
+  throwIfAborted(signal);
+
+  const pageText = await page.locator("body").innerText({ timeout: 20000 });
+  if (expectedTrack && scoreType(pageText, expectedTrack, config) < TRACK_MATCH_MIN_SCORE) {
+    throw new Error(`已停止填写：无法在表单页面确认赛道「${expectedTrack}」`);
+  }
+  const account = getAccountData(accountName);
+  const pickedDouyin = autoDouyin
+    ? expectedTrack
+      ? pickDouyinForExpectedTrack(account, expectedTrack, config)
+      : pickDouyinForPage(pageText, account, config)
+    : {
+      douyin: getSelectedDouyin(account, douyinIndex),
+      index: Number(douyinIndex),
+      pickedType: null,
+      tracks: []
+    };
+  const selectedDouyin = pickedDouyin.douyin;
+  if (autoDouyin && !selectedDouyin) {
+    throw new Error("没有找到可匹配的抖音号");
+  }
+  const selectedDouyinIndex = Number.isInteger(pickedDouyin.index) ? pickedDouyin.index : Number(douyinIndex);
+  const candidateTracks = trackListForDouyin(selectedDouyin);
+  const pickedType = expectedTrack && (!candidateTracks.length || candidateTracks.some((track) => trackMatches(expectedTrack, track, config)))
+    ? { typeName: expectedTrack, score: 999, source: "provided" }
+    : pickedDouyin.pickedType || pickType(pageText, config, candidateTracks);
+  const typeName = pickedType.typeName;
+  if (!typeName) {
+    throw new Error("无法根据表单标题判断赛道，已停止填写");
+  }
+  const answers = mergeAccountAnswers(buildAnswers(config, typeName), account, selectedDouyin);
+  log(`识别到赛道：${typeName}${pickedType.source === "keywords" ? `（匹配分 ${pickedType.score}）` : pickedType.source === "provided" ? "（表单标题）" : "（默认）"}`);
+  if (selectedDouyin) {
+    log(`使用抖音号：${selectedDouyin.nickname} / ${selectedDouyin.douyinId}${autoDouyin ? "（智能匹配）" : ""}`);
+    if (candidateTracks.length > 1) {
+      log(`可选赛道：${candidateTracks.join("、")}`);
+    }
+  }
+
+  const textResult = await fillTextFieldsWithRetry(page, answers, log, signal);
+  if (!textResult.filled.length) {
+    throw new Error("没有识别到可填写的文字字段，已停在当前表单页，请检查页面是否加载完整");
+  }
+  const imageResult = await uploadImages(page, answers, signal);
+  throwIfAborted(signal);
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const screenshotPath = path.join(outputDir, `filled-${timestamp}.png`);
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+
+  log("");
+  log("已填写的文本字段：");
+  for (const item of textResult.filled) {
+    log(`- ${item.index}. ${item.label} => ${item.value}`);
+  }
+
+  if (imageResult.uploaded.length) {
+    log("");
+    log("已上传的图片：");
+    for (const item of imageResult.uploaded) {
+      log(`- ${item.index}. ${item.label} => ${item.file}`);
+    }
+  }
+
+  if (textResult.skipped.length || imageResult.skipped.length) {
+    log("");
+    log("跳过的字段：");
+    for (const item of [...textResult.skipped, ...imageResult.skipped]) {
+      log(`- ${item.index}. ${item.label}${item.reason ? `（${item.reason}）` : ""}`);
+    }
+  }
+
+  log("");
+  log(`已保存填写后截图：${screenshotPath}`);
+
+  const blockingImageSkips = imageResult.skipped.filter((item) => item.required);
+  if (blockingImageSkips.length) {
+    throw new Error(`截图未上传：${blockingImageSkips.map((item) => item.reason || item.label || "上传失败").join("；")}`);
+  }
+
+  let submitted = false;
+  if ((forceAutoSubmit || config.autoSubmit) && !dryRun) {
+    submitted = await clickSubmitButton(page, log, signal);
+  } else {
+    log(dryRun
+      ? "测试已停在提交前，不会自动提交。你可以检查文字和图片是否正确。"
+      : background ? "已填写完成并保存截图，记录为待提交。" : "已停在提交前。确认无误后你可以手动提交。");
+  }
+
+  return {
+    screenshotPath,
+    submitted,
+    typeName,
+    douyinIndex: Number.isInteger(selectedDouyinIndex) ? selectedDouyinIndex : "",
+    douyinLabel: selectedDouyin ? `${selectedDouyin.nickname || "未命名"} / ${selectedDouyin.douyinId || "无ID"} / ${typeName || "未分类"}` : "",
+    filledCount: textResult.filled.length,
+    skippedCount: textResult.skipped.length + imageResult.skipped.length
+  };
 }
 
 async function maybeClickLogin(page) {
@@ -858,6 +1348,7 @@ async function runFromArgs(args = process.argv.slice(2), logger = console.log, o
   const checkLogin = args.includes("--check-login");
   const background = args.includes("--background");
   const forceVisible = args.includes("--visible");
+  const forceAutoSubmit = args.includes("--auto-submit");
   const keepOpen = args.includes("--keep-open");
   const holdArg = args.find((arg) => arg.startsWith("--hold-ms="));
   const holdMs = holdArg ? Number(holdArg.split("=")[1]) || 0 : 0;
@@ -865,7 +1356,10 @@ async function runFromArgs(args = process.argv.slice(2), logger = console.log, o
   const accountName = accountArg ? accountArg.split("=").slice(1).join("=").trim() : "";
   const douyinArg = args.find((arg) => arg.startsWith("--douyin-index="));
   const douyinIndex = douyinArg ? douyinArg.split("=").slice(1).join("=").trim() : "";
+  const douyinIndexesArg = args.find((arg) => arg.startsWith("--douyin-indexes="));
+  const douyinIndexes = douyinIndexesArg ? parseDouyinIndexesArg(douyinIndexesArg.split("=").slice(1).join("=")) : [];
   const autoDouyin = args.includes("--auto-douyin");
+  const includeTrackSiblings = args.includes("--include-track-siblings");
   const expectedTrackArg = args.find((arg) => arg.startsWith("--expected-track="));
   const expectedTrack = expectedTrackArg ? expectedTrackArg.split("=").slice(1).join("=").trim() : "";
   const browserArg = args.find((arg) => arg.startsWith("--browser="));
@@ -969,105 +1463,66 @@ async function runFromArgs(args = process.argv.slice(2), logger = console.log, o
       await page.bringToFront().catch(() => {});
     }
     await abortableWait(page, 5000, signal);
-
-    if (dryRun) {
-      log("正在进行测试模式：验证字段识别、填值和图片上传，不提交。");
-      await page.evaluate(() => {
-        for (const textarea of document.querySelectorAll("textarea")) {
-          textarea.disabled = false;
-          textarea.readOnly = false;
-          textarea.removeAttribute("disabled");
-          textarea.removeAttribute("readonly");
-        }
-      });
-    } else {
-      await maybeClickLogin(page);
-      await waitUntilEditable(page, log, signal, { background });
-    }
-    throwIfAborted(signal);
-
-    const pageText = await page.locator("body").innerText({ timeout: 20000 });
-    if (expectedTrack && scoreType(pageText, expectedTrack, config) < TRACK_MATCH_MIN_SCORE) {
-      throw new Error(`已停止填写：无法在表单页面确认赛道「${expectedTrack}」`);
-    }
     const account = getAccountData(accountName);
-    const pickedDouyin = autoDouyin
-      ? expectedTrack
-        ? pickDouyinForExpectedTrack(account, expectedTrack, config)
-        : pickDouyinForPage(pageText, account, config)
-      : {
-        douyin: getSelectedDouyin(account, douyinIndex),
-        index: Number(douyinIndex),
-        pickedType: null,
-        tracks: []
-      };
-    const selectedDouyin = pickedDouyin.douyin;
-    if (autoDouyin && !selectedDouyin) {
-      throw new Error("没有找到可匹配的抖音号");
+    const autoMatchedIndexes = autoDouyin && expectedTrack
+      ? matchingDouyinIndexesForExpectedTrack(account, expectedTrack, config)
+      : [];
+    const fillTargets = douyinIndexes.length
+      ? douyinIndexes
+      : autoMatchedIndexes.length > 1
+        ? autoMatchedIndexes
+        : [douyinIndex];
+    const useAutoPickPerFill = autoDouyin && !douyinIndexes.length && autoMatchedIndexes.length <= 1;
+    const canExpandAfterPageDetect = !expectedTrack && !douyinIndexes.length && (autoDouyin || includeTrackSiblings);
+    if (autoMatchedIndexes.length > 1) {
+      log(`这个赛道匹配到 ${autoMatchedIndexes.length} 个抖音号，将在同一个窗口连续填写：${autoMatchedIndexes.map((index) => douyinLabelForIndex(account, index)).join("；")}`);
     }
-    const selectedDouyinIndex = Number.isInteger(pickedDouyin.index) ? pickedDouyin.index : Number(douyinIndex);
-    const candidateTracks = trackListForDouyin(selectedDouyin);
-    const pickedType = expectedTrack && (!candidateTracks.length || candidateTracks.some((track) => trackMatches(expectedTrack, track, config)))
-      ? { typeName: expectedTrack, score: 999, source: "provided" }
-      : pickedDouyin.pickedType || pickType(pageText, config, candidateTracks);
-    const typeName = pickedType.typeName;
-    if (!typeName) {
-      throw new Error("无法根据表单标题判断赛道，已停止填写");
-    }
-    const answers = mergeAccountAnswers(buildAnswers(config, typeName), account, selectedDouyin);
-    log(`识别到赛道：${typeName}${pickedType.source === "keywords" ? `（匹配分 ${pickedType.score}）` : pickedType.source === "provided" ? "（表单标题）" : "（默认）"}`);
-    if (selectedDouyin) {
-      log(`使用抖音号：${selectedDouyin.nickname} / ${selectedDouyin.douyinId}${autoDouyin ? "（智能匹配）" : ""}`);
-      if (candidateTracks.length > 1) {
-        log(`可选赛道：${candidateTracks.join("、")}`);
+    const results = [];
+    for (let targetIndex = 0; targetIndex < fillTargets.length; targetIndex += 1) {
+      const currentDouyinIndex = fillTargets[targetIndex];
+      if (fillTargets.length > 1) {
+        log("");
+        log(`开始填写第 ${targetIndex + 1}/${fillTargets.length} 个抖音号。`);
       }
-    }
-
-    const textResult = await fillTextFields(page, answers);
-    const imageResult = await uploadImages(page, answers, signal);
-    throwIfAborted(signal);
-
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const screenshotPath = path.join(outputDir, `filled-${timestamp}.png`);
-    await page.screenshot({ path: screenshotPath, fullPage: true });
-
-    log("");
-    log("已填写的文本字段：");
-    for (const item of textResult.filled) {
-      log(`- ${item.index}. ${item.label} => ${item.value}`);
-    }
-
-    if (imageResult.uploaded.length) {
-      log("");
-      log("已上传的图片：");
-      for (const item of imageResult.uploaded) {
-        log(`- ${item.index}. ${item.label} => ${item.file}`);
+      const result = await fillOneDouyinOnCurrentPage(page, {
+        config,
+        accountName,
+        douyinIndex: currentDouyinIndex,
+        autoDouyin: useAutoPickPerFill,
+        expectedTrack,
+        dryRun,
+        background,
+        forceAutoSubmit,
+        log,
+        signal
+      });
+      results.push(result);
+      if (Number.isInteger(Number(result.douyinIndex)) && String(fillTargets[targetIndex] || "") !== String(result.douyinIndex)) {
+        fillTargets[targetIndex] = String(result.douyinIndex);
       }
-    }
-
-    if (textResult.skipped.length || imageResult.skipped.length) {
-      log("");
-      log("跳过的字段：");
-      for (const item of [...textResult.skipped, ...imageResult.skipped]) {
-        log(`- ${item.index}. ${item.label}${item.reason ? `（${item.reason}）` : ""}`);
+      if (canExpandAfterPageDetect && targetIndex === 0 && result.typeName) {
+        const usedIndexes = new Set(results
+          .map((item) => item && item.douyinIndex)
+          .filter((item) => item !== undefined && item !== null && item !== "")
+          .map((item) => String(item)));
+        const queuedIndexes = new Set(fillTargets
+          .map((item) => String(item || ""))
+          .filter(Boolean));
+        const siblingIndexes = matchingDouyinIndexesForExpectedTrack(account, result.typeName, config)
+          .map((index) => String(index))
+          .filter((index) => !usedIndexes.has(index) && !queuedIndexes.has(index));
+        if (siblingIndexes.length) {
+          fillTargets.push(...siblingIndexes);
+          log(`页面已识别到赛道「${result.typeName}」，同微信号还有 ${siblingIndexes.length} 个同赛道抖音号，将继续填写：${siblingIndexes.map((index) => douyinLabelForIndex(account, index)).join("；")}`);
+        }
       }
-    }
-
-    log("");
-    log(`已保存填写后截图：${screenshotPath}`);
-
-    const blockingImageSkips = imageResult.skipped.filter((item) => item.required);
-    if (blockingImageSkips.length) {
-      throw new Error(`截图未上传：${blockingImageSkips.map((item) => item.reason || item.label || "上传失败").join("；")}`);
-    }
-
-    let submitted = false;
-    if (config.autoSubmit && !dryRun) {
-      submitted = await clickSubmitButton(page, log, signal);
-    } else {
-      log(dryRun
-        ? "测试已停在提交前，不会自动提交。你可以检查文字和图片是否正确。"
-        : background ? "已填写完成并保存截图，记录为待提交。" : "已停在提交前。确认无误后你可以手动提交。");
+      if (targetIndex < fillTargets.length - 1) {
+        if (!result.submitted) {
+          await waitForSubmittedPage(page, log, signal);
+        }
+        log("正在点击“再填一份”，继续填写下一个抖音号。");
+        await clickFillAgainForNext(page, log, signal);
+      }
     }
 
     if (closeAfterFill) {
@@ -1087,14 +1542,17 @@ async function runFromArgs(args = process.argv.slice(2), logger = console.log, o
       });
     }
 
+    const lastResult = results[results.length - 1] || {};
+    if (results.length <= 1) {
+      return lastResult;
+    }
     return {
-      screenshotPath,
-      submitted,
-      typeName,
-      douyinIndex: Number.isInteger(selectedDouyinIndex) ? selectedDouyinIndex : "",
-      douyinLabel: selectedDouyin ? `${selectedDouyin.nickname || "未命名"} / ${selectedDouyin.douyinId || "无ID"} / ${typeName || "未分类"}` : "",
-      filledCount: textResult.filled.length,
-      skippedCount: textResult.skipped.length + imageResult.skipped.length
+      ...lastResult,
+      submitted: results.every((item) => item.submitted),
+      results,
+      count: results.length,
+      filledCount: results.reduce((sum, item) => sum + Number(item.filledCount || 0), 0),
+      skippedCount: results.reduce((sum, item) => sum + Number(item.skippedCount || 0), 0)
     };
   } finally {
     if (signal && onAbort) {

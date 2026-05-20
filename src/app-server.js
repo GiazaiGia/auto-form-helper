@@ -1208,6 +1208,21 @@ function writeHistory(data) {
   return next;
 }
 
+function deleteHistoryItems(ids = []) {
+  const idSet = new Set((Array.isArray(ids) ? ids : []).map((id) => String(id || "")).filter(Boolean));
+  if (!idSet.size) {
+    return { deleted: 0, items: readHistory().items };
+  }
+  const data = readHistory();
+  const before = data.items.length;
+  const items = data.items.filter((item) => !idSet.has(String(item.id || "")));
+  writeHistory({ items });
+  return {
+    deleted: before - items.length,
+    items: readHistory().items
+  };
+}
+
 function getDouyinLabel(accountName, douyinIndex) {
   if (douyinIndex === undefined || douyinIndex === null || String(douyinIndex) === "") {
     return "";
@@ -1247,6 +1262,7 @@ function matchingDouyinTargets(account, expectedTrack) {
 
 function resolveFillTargets(account, item = {}, fallbackText = "", options = {}) {
   const requireExpectedTrack = options.requireExpectedTrack === true;
+  const includeTrackSiblings = options.includeTrackSiblings === true;
   const requestedIndex = item.douyinIndex === undefined || item.douyinIndex === null ? "__auto__" : String(item.douyinIndex);
   if (requestedIndex && requestedIndex !== "__auto__") {
     if (requireExpectedTrack && !item.expectedTrack) {
@@ -1254,9 +1270,16 @@ function resolveFillTargets(account, item = {}, fallbackText = "", options = {})
     }
     const index = Number(requestedIndex);
     const douyin = account && Number.isInteger(index) ? (account.douyinAccounts || [])[index] : null;
-    return douyin
-      ? { track: item.expectedTrack || "", targets: [{ douyin, index, tracks: douyinTracks(douyin) }] }
-      : { track: item.expectedTrack || "", targets: [], reason: `${account && account.name || "当前微信号"} 没有这个抖音号` };
+    if (!douyin) {
+      return { track: item.expectedTrack || "", targets: [], reason: `${account && account.name || "当前微信号"} 没有这个抖音号` };
+    }
+    if (includeTrackSiblings && item.expectedTrack) {
+      const targets = matchingDouyinTargets(account, item.expectedTrack);
+      if (targets.some((target) => Number(target.index) === index)) {
+        return { track: item.expectedTrack || "", targets, trackScore: item.trackScore || 0 };
+      }
+    }
+    return { track: item.expectedTrack || "", targets: [{ douyin, index, tracks: douyinTracks(douyin) }] };
   }
 
   const guessed = item.expectedTrack
@@ -1664,6 +1687,8 @@ async function startAutoFillFromMonitorRecord(record, config) {
   const started = [];
   const errors = [];
   const skippedExisting = [];
+  const answerSettings = readJson(answersPath, {});
+  const canUseRepeatButton = answerSettings.autoSubmit === true;
   for (const accountName of accountNames) {
     try {
       const account = getAccount(accountName);
@@ -1678,6 +1703,7 @@ async function startAutoFillFromMonitorRecord(record, config) {
         errors.push(targetInfo.reason || `${account.name} 没有匹配的抖音号`);
         continue;
       }
+      const preparedTargets = [];
       for (const target of targetInfo.targets) {
         const douyinIndex = String(target.index);
         validateFillRequest(account, douyinIndex, false);
@@ -1699,15 +1725,34 @@ async function startAutoFillFromMonitorRecord(record, config) {
           continue;
         }
         const historyItem = prepared.item;
+        preparedTargets.push({ douyinIndex, historyId: historyItem.id });
+      }
+      if (!preparedTargets.length) {
+        continue;
+      }
+      const targetGroups = canUseRepeatButton
+        ? [preparedTargets]
+        : preparedTargets.map((target) => [target]);
+      for (const groupTargets of targetGroups) {
+        const historyTargets = groupTargets.map((target) => ({
+          historyId: target.historyId,
+          douyinIndex: target.douyinIndex,
+          expectedTrack: targetInfo.track || record.expectedTrack
+        }));
         const job = startFillJob({
           accountName: account.name,
           url: record.url,
-          douyinIndex,
+          douyinIndex: groupTargets[0].douyinIndex,
+          douyinIndexes: groupTargets.map((target) => target.douyinIndex),
           expectedTrack: targetInfo.track || record.expectedTrack,
-          historyId: historyItem.id
+          historyId: historyTargets[0] && historyTargets[0].historyId || "",
+          historyTargets,
+          includeTrackSiblings: canUseRepeatButton
         });
-        updateHistoryItem(historyItem.id, { status: "填写中", jobId: job.id, message: "监控采集已加入填表队列" });
-        started.push({ jobId: job.id, historyId: historyItem.id, account: account.name });
+        for (const groupTarget of groupTargets) {
+          updateHistoryItem(groupTarget.historyId, { status: "填写中", jobId: job.id, message: "监控采集已加入填表队列" });
+          started.push({ jobId: job.id, historyId: groupTarget.historyId, account: account.name });
+        }
       }
     } catch (error) {
       errors.push(error.message);
@@ -2731,6 +2776,56 @@ function upsertAccount(account) {
   return data;
 }
 
+function historyTargetsFromMeta(meta = {}) {
+  const targets = Array.isArray(meta.historyTargets)
+    ? meta.historyTargets.map((item) => ({
+      historyId: String(item && item.historyId || item && item.id || ""),
+      douyinIndex: item && item.douyinIndex !== undefined && item.douyinIndex !== null ? String(item.douyinIndex) : "",
+      expectedTrack: item && item.expectedTrack || ""
+    })).filter((item) => item.historyId)
+    : [];
+  if (targets.length) {
+    return targets;
+  }
+  return meta.historyId ? [{ historyId: meta.historyId, douyinIndex: "", expectedTrack: "" }] : [];
+}
+
+function fillResultForHistoryTarget(result, target, index) {
+  const results = Array.isArray(result && result.results)
+    ? result.results
+    : result ? [result] : [];
+  if (target && target.douyinIndex !== "") {
+    const matched = results.find((item) => String(item && item.douyinIndex) === String(target.douyinIndex));
+    if (matched) {
+      return matched;
+    }
+  }
+  return results[index] || results[0] || {};
+}
+
+function updateFillHistorySuccess(meta, result, filledAt) {
+  const targets = historyTargetsFromMeta(meta);
+  for (let index = 0; index < targets.length; index += 1) {
+    const target = targets[index];
+    const itemResult = fillResultForHistoryTarget(result, target, index);
+    updateHistoryItem(target.historyId, {
+      status: itemResult && itemResult.submitted ? "已提交" : "待提交",
+      filledAt,
+      screenshotPath: itemResult && itemResult.screenshotPath || "",
+      douyinIndex: itemResult && itemResult.douyinIndex !== undefined ? String(itemResult.douyinIndex) : target.douyinIndex || undefined,
+      douyinLabel: itemResult && itemResult.douyinLabel || undefined,
+      expectedTrack: itemResult && itemResult.typeName || target.expectedTrack || undefined,
+      message: itemResult && itemResult.typeName ? `填写完成，赛道：${itemResult.typeName}` : "填写完成"
+    });
+  }
+}
+
+function updateFillHistoryError(meta, patch) {
+  for (const target of historyTargetsFromMeta(meta)) {
+    updateHistoryItem(target.historyId, patch);
+  }
+}
+
 function runJob(kind, args, meta = {}) {
   const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const abortController = new AbortController();
@@ -2790,17 +2885,7 @@ function runJob(kind, args, meta = {}) {
       job.exitCode = 0;
       job.result = result || {};
       job.endedAt = new Date().toISOString();
-      if (meta.historyId) {
-        updateHistoryItem(meta.historyId, {
-          status: result && result.submitted ? "已提交" : "待提交",
-          filledAt: job.endedAt,
-          screenshotPath: result && result.screenshotPath || "",
-          douyinIndex: result && result.douyinIndex !== undefined ? String(result.douyinIndex) : undefined,
-          douyinLabel: result && result.douyinLabel || undefined,
-          expectedTrack: result && result.typeName || undefined,
-          message: result && result.typeName ? `填写完成，赛道：${result.typeName}` : "填写完成"
-        });
-      }
+      updateFillHistorySuccess(meta, result, job.endedAt);
     })
     .catch((error) => {
       const stopped = job.cancelRequested || error.name === "AbortError" || /用户已停止填表|任务已取消|Target page, context or browser has been closed/i.test(error.message || "");
@@ -2813,13 +2898,11 @@ function runJob(kind, args, meta = {}) {
         : nonFillable
           ? `表单不可填写，已自动跳过：${error.message}\n`
           : `自动填表失败：${error.message}\n`);
-      if (meta.historyId) {
-        updateHistoryItem(meta.historyId, stopped
-          ? { status: "待填写", jobId: "", message: "已停止填表，可重新开始" }
-          : nonFillable
-            ? { status: "不可填写", jobId: "", message: `已自动跳过：${error.message}` }
-            : { status: classifyFillError(error.message), message: error.message });
-      }
+      updateFillHistoryError(meta, stopped
+        ? { status: "待填写", jobId: "", message: "已停止填表，可重新开始" }
+        : nonFillable
+          ? { status: "不可填写", jobId: "", message: `已自动跳过：${error.message}` }
+          : { status: classifyFillError(error.message), message: error.message });
     });
 
   if (meta.queueKey) {
@@ -3145,26 +3228,51 @@ function normalizeFillItems(body) {
   return items;
 }
 
-function startFillJob({ accountName, url, douyinIndex = "", dryRun = false, historyId = "", expectedTrack = "" }) {
+function startFillJob({
+  accountName,
+  url,
+  douyinIndex = "",
+  douyinIndexes = [],
+  dryRun = false,
+  historyId = "",
+  historyTargets = [],
+  expectedTrack = "",
+  visible = false,
+  forceAutoSubmit = false,
+  includeTrackSiblings = false
+}) {
   const account = getAccount(accountName);
-  validateFillRequest(account, douyinIndex, dryRun);
-  if (expectedTrack && douyinIndex && douyinIndex !== "__auto__") {
-    const index = Number(douyinIndex);
-    const selectedDouyin = Number.isInteger(index) ? (account.douyinAccounts || [])[index] : null;
-    const matchesTrack = selectedDouyin && douyinTracks(selectedDouyin).some((track) => trackMatches(expectedTrack, track));
-    if (!matchesTrack) {
-      throw new Error(`已停止填写：表单赛道「${expectedTrack}」与选中的抖音号赛道不一致`);
+  const targetDouyinIndexes = Array.isArray(douyinIndexes)
+    ? uniqueCleanList(douyinIndexes.map((item) => String(item || "").trim()).filter(Boolean))
+    : [];
+  const validationIndexes = targetDouyinIndexes.length ? targetDouyinIndexes : [douyinIndex];
+  for (const targetDouyinIndex of validationIndexes) {
+    validateFillRequest(account, targetDouyinIndex, dryRun);
+    if (expectedTrack && targetDouyinIndex && targetDouyinIndex !== "__auto__") {
+      const index = Number(targetDouyinIndex);
+      const selectedDouyin = Number.isInteger(index) ? (account.douyinAccounts || [])[index] : null;
+      const matchesTrack = selectedDouyin && douyinTracks(selectedDouyin).some((track) => trackMatches(expectedTrack, track));
+      if (!matchesTrack) {
+        throw new Error(`已停止填写：表单赛道「${expectedTrack}」与选中的抖音号赛道不一致`);
+      }
     }
   }
 
   const answers = readJson(answersPath, {});
-  const autoSubmit = answers.autoSubmit === true && !dryRun;
+  const autoSubmit = (forceAutoSubmit || answers.autoSubmit === true) && !dryRun;
   const holdMs = autoSubmit ? 3000 : 1000;
-  const extra = dryRun
-    ? [normalizeUrl(url), "--visible", "--keep-open"]
-    : [normalizeUrl(url), "--background", `--hold-ms=${holdMs}`];
-  if (douyinIndex === "__auto__") {
+  const extra = [normalizeUrl(url)];
+  if (dryRun) {
+    extra.push("--visible", "--keep-open");
+  } else {
+    extra.push(visible ? "--visible" : "--background", `--hold-ms=${holdMs}`);
+  }
+  if (targetDouyinIndexes.length > 1) {
+    extra.push(`--douyin-indexes=${targetDouyinIndexes.join(",")}`);
+  } else if (douyinIndex === "__auto__") {
     extra.push("--auto-douyin");
+  } else if (targetDouyinIndexes.length === 1) {
+    extra.push(`--douyin-index=${targetDouyinIndexes[0]}`);
   } else if (douyinIndex !== undefined && douyinIndex !== "") {
     extra.push(`--douyin-index=${douyinIndex}`);
   }
@@ -3174,8 +3282,15 @@ function startFillJob({ accountName, url, douyinIndex = "", dryRun = false, hist
   if (dryRun) {
     extra.push("--dry-run");
   }
+  if (forceAutoSubmit) {
+    extra.push("--auto-submit");
+  }
+  if (includeTrackSiblings) {
+    extra.push("--include-track-siblings");
+  }
   return runJob("fill", fillArgsFor(account, extra), {
     historyId,
+    historyTargets,
     queueKey: `fill:${account.name}`,
     queueLabel: account.name
   });
@@ -6453,6 +6568,12 @@ async function routeApi(req, res, pathname) {
     return;
   }
 
+  if (req.method === "POST" && pathname === "/api/history/delete") {
+    const body = await readBody(req);
+    sendJson(res, 200, deleteHistoryItems(body.ids));
+    return;
+  }
+
   if (req.method === "POST" && pathname === "/api/history/fill") {
     try {
       const body = await readBody(req);
@@ -6481,6 +6602,8 @@ async function routeApi(req, res, pathname) {
     try {
       const body = await readBody(req);
       const accountNames = accountNamesFromBody(body);
+      const answerSettings = readJson(answersPath, {});
+      const canUseRepeatButton = body.dryRun || answerSettings.autoSubmit === true;
       const idSet = new Set((Array.isArray(body.ids) ? body.ids : []).map((id) => String(id || "")));
       const items = readHistory().items.filter((item) => {
         if (idSet.size && !idSet.has(String(item.id || ""))) {
@@ -6520,6 +6643,7 @@ async function routeApi(req, res, pathname) {
               errors.push(targetInfo.reason || `${account.name} 没有匹配的抖音号`);
               continue;
             }
+            const preparedTargets = [];
             for (const target of targetInfo.targets) {
               const douyinIndex = String(target.index);
               validateFillRequest(account, douyinIndex, body.dryRun);
@@ -6550,16 +6674,37 @@ async function routeApi(req, res, pathname) {
                 continue;
               }
               const historyItem = readyItem.item || readyItem;
+              preparedTargets.push({ douyinIndex, historyId: historyItem.id });
+            }
+
+            if (!preparedTargets.length) {
+              continue;
+            }
+
+            const targetGroups = canUseRepeatButton
+              ? [preparedTargets]
+              : preparedTargets.map((target) => [target]);
+            for (const groupTargets of targetGroups) {
+              const historyTargets = groupTargets.map((target) => ({
+                historyId: target.historyId,
+                douyinIndex: target.douyinIndex,
+                expectedTrack: targetInfo.track || enrichedItem.expectedTrack
+              }));
               const job = startFillJob({
                 accountName: account.name,
                 url: confirmedUrl,
-                douyinIndex,
+                douyinIndex: groupTargets[0].douyinIndex,
+                douyinIndexes: groupTargets.map((target) => target.douyinIndex),
                 dryRun: body.dryRun,
                 expectedTrack: targetInfo.track || enrichedItem.expectedTrack,
-                historyId: historyItem.id
+                historyId: historyTargets[0] && historyTargets[0].historyId || "",
+                historyTargets,
+                includeTrackSiblings: canUseRepeatButton
               });
-              updateHistoryItem(historyItem.id, { status: "填写中", jobId: job.id, message: "监控采集已加入填表队列" });
-              started.push({ jobId: job.id, historyId: historyItem.id, account: account.name });
+              for (const groupTarget of groupTargets) {
+                updateHistoryItem(groupTarget.historyId, { status: "填写中", jobId: job.id, message: "监控采集已加入填表队列" });
+                started.push({ jobId: job.id, historyId: groupTarget.historyId, account: account.name });
+              }
             }
           } catch (error) {
             errors.push(error.message);
@@ -6668,6 +6813,11 @@ async function routeApi(req, res, pathname) {
     const accountNames = accountNamesFromBody(body);
     const selectedAccounts = accountNames.map((name) => getAccount(name));
     const items = normalizeFillItems(body);
+    const visible = body.visible === true;
+    const forceAutoSubmit = body.forceAutoSubmit === true;
+    const skipHistory = body.skipHistory === true;
+    const answerSettings = readJson(answersPath, {});
+    const canUseRepeatButton = body.dryRun || forceAutoSubmit || answerSettings.autoSubmit === true;
     if (!selectedAccounts.length || selectedAccounts.some((account) => !account)) {
       sendJson(res, 404, { error: "没有找到这个账号" });
       return;
@@ -6693,62 +6843,103 @@ async function routeApi(req, res, pathname) {
 
       for (const account of selectedAccounts) {
         for (const item of confirmedItems) {
-          const targetInfo = resolveFillTargets(account, item, item.contextText || item.expectedTrack || "", { requireExpectedTrack: true });
+          let targetInfo = resolveFillTargets(account, item, item.contextText || item.expectedTrack || "", {
+            requireExpectedTrack: true,
+            includeTrackSiblings: true
+          });
+          if (!targetInfo.targets.length && canUseRepeatButton && !targetInfo.track) {
+            targetInfo = {
+              track: "",
+              trackScore: 0,
+              targets: [{
+                douyin: null,
+                index: item.douyinIndex || "__auto__",
+                tracks: []
+              }],
+              deferredTrackDetection: true
+            };
+          }
           if (!targetInfo.targets.length) {
             skipped.push({ account: account.name, url: item.url, reason: targetInfo.reason || "没有匹配的抖音号" });
             continue;
           }
+          const preparedTargets = [];
           for (const target of targetInfo.targets) {
             const douyinIndex = String(target.index);
             validateFillRequest(account, douyinIndex, body.dryRun);
             const message = item.expectedTrack
               ? `匹配赛道：${targetInfo.track || item.expectedTrack}`
               : targetInfo.track ? `匹配赛道：${targetInfo.track}` : "";
-            if (body.dryRun) {
-              const job = startFillJob({
-                accountName: account.name,
+            let historyId = "";
+            if (!skipHistory) {
+              const prepared = prepareFillHistory({
+                source: body.dryRun || forceAutoSubmit ? "测试" : "手动",
+                channel: "manual",
                 url: item.url,
+                accountName: account.name,
                 douyinIndex,
-                dryRun: true,
                 expectedTrack: targetInfo.track || item.expectedTrack,
-                historyId: ""
+                trackScore: targetInfo.trackScore || item.trackScore,
+                message: body.dryRun || forceAutoSubmit ? message || "测试任务已启动" : message,
+                contextText: item.contextText,
+                dedupe: forceAutoSubmit ? false : true
               });
-              started.push({ jobId: job.id, historyId: "", account: account.name, test: true });
-              continue;
+              if (prepared.skipped) {
+                skipped.push({ account: account.name, url: item.url, reason: prepared.reason });
+                continue;
+              }
+              historyId = prepared.item.id;
             }
-            const prepared = prepareFillHistory({
-              source: "手动",
-              channel: "manual",
-              url: item.url,
-              accountName: account.name,
-              douyinIndex,
-              expectedTrack: targetInfo.track || item.expectedTrack,
-              trackScore: targetInfo.trackScore || item.trackScore,
-              message,
-              contextText: item.contextText,
-              dedupe: true
-            });
-            if (prepared.skipped) {
-              skipped.push({ account: account.name, url: item.url, reason: prepared.reason });
-              continue;
-            }
-            const history = prepared.item;
+            preparedTargets.push({ douyinIndex, historyId, message });
+          }
+
+          if (!preparedTargets.length) {
+            continue;
+          }
+
+          const targetGroups = canUseRepeatButton
+            ? [preparedTargets]
+            : preparedTargets.map((target) => [target]);
+          for (const groupTargets of targetGroups) {
+            const historyTargets = groupTargets
+              .filter((target) => target.historyId)
+              .map((target) => ({
+                historyId: target.historyId,
+                douyinIndex: target.douyinIndex,
+                expectedTrack: targetInfo.track || item.expectedTrack
+              }));
             const job = startFillJob({
               accountName: account.name,
               url: item.url,
-              douyinIndex,
+              douyinIndex: groupTargets[0].douyinIndex,
+              douyinIndexes: groupTargets.map((target) => target.douyinIndex),
               dryRun: body.dryRun,
               expectedTrack: targetInfo.track || item.expectedTrack,
-              historyId: history.id
+              visible,
+              forceAutoSubmit,
+              historyId: historyTargets[0] && historyTargets[0].historyId || "",
+              historyTargets,
+              includeTrackSiblings: canUseRepeatButton
             });
-            updateHistoryItem(history.id, {
-              status: "填写中",
-              jobId: job.id,
-              message: confirmedItems.length * selectedAccounts.length > 1 || targetInfo.targets.length > 1
-                ? `批量任务已加入队列${targetInfo.track ? ` · 匹配赛道：${targetInfo.track}` : ""}`
-                : ""
-            });
-            started.push({ jobId: job.id, historyId: history.id, account: account.name });
+            for (const groupTarget of groupTargets) {
+              if (groupTarget.historyId) {
+                updateHistoryItem(groupTarget.historyId, {
+                  status: "填写中",
+                  jobId: job.id,
+                  message: body.dryRun
+                    ? "测试任务已启动"
+                    : confirmedItems.length * selectedAccounts.length > 1 || targetInfo.targets.length > 1
+                      ? `批量任务已加入队列${targetInfo.track ? ` · 匹配赛道：${targetInfo.track}` : ""}`
+                      : ""
+                });
+              }
+              started.push({
+                jobId: job.id,
+                historyId: groupTarget.historyId,
+                account: account.name,
+                test: body.dryRun || skipHistory
+              });
+            }
           }
         }
       }
@@ -6787,6 +6978,14 @@ async function routeApi(req, res, pathname) {
       return;
     }
     sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === "GET" && pathname === "/api/jobs") {
+    const list = Array.from(jobs.values())
+      .sort((a, b) => String(b.startedAt || "").localeCompare(String(a.startedAt || "")))
+      .slice(0, 50);
+    sendJson(res, 200, { jobs: list });
     return;
   }
 

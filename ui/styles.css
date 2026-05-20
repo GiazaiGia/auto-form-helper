@@ -1375,6 +1375,23 @@ button:disabled {
   margin-top: 10px;
 }
 
+.history-selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #d9e0e8;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.history-selection-bar button {
+  min-height: 34px;
+  padding: 6px 12px;
+}
+
 .history-quick-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
@@ -1485,6 +1502,23 @@ button:disabled {
   border-radius: 8px;
   padding: 12px;
   background: #f8fafc;
+}
+
+.history-select {
+  justify-content: center;
+  margin: 0 0 6px;
+}
+
+.history-select input,
+.history-selection-bar input,
+.test-history-sync input {
+  width: 18px;
+  height: 18px;
+}
+
+.test-history-sync {
+  margin-top: -6px;
+  margin-bottom: 12px;
 }
 
 .source-group .source-row {
