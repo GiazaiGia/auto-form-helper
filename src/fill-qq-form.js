@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const readline = require("readline");
+const { execFileSync } = require("child_process");
 
 let chromium;
 try {
@@ -86,6 +87,76 @@ function findEdgeExecutable() {
 
 function edgeUserDataDir() {
   return path.join(process.env.LOCALAPPDATA || "", "Microsoft", "Edge", "User Data");
+}
+
+function clampNumber(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function visibleBrowserBoundsForWorkArea(workArea = {}) {
+  const areaWidth = Number(workArea.width || 0);
+  const areaHeight = Number(workArea.height || 0);
+  const areaLeft = Number(workArea.left || 0);
+  const areaTop = Number(workArea.top || 0);
+  const safeAreaWidth = areaWidth > 0 ? areaWidth : 1366;
+  const safeAreaHeight = areaHeight > 0 ? areaHeight : 900;
+
+  let width = Math.min(1280, Math.max(900, safeAreaWidth - 80));
+  let height = Math.min(900, Math.max(520, safeAreaHeight - 90));
+  if (width > safeAreaWidth - 40) {
+    width = Math.max(760, safeAreaWidth - 40);
+  }
+  if (height > safeAreaHeight - 40) {
+    height = Math.max(480, safeAreaHeight - 40);
+  }
+
+  const x = areaLeft + clampNumber(Math.floor((safeAreaWidth - width) / 2), 10, Math.max(10, safeAreaWidth - width));
+  const y = areaTop + 10;
+  return {
+    width: Math.round(width),
+    height: Math.round(height),
+    x: Math.round(x),
+    y: Math.round(y)
+  };
+}
+
+function readPrimaryScreenWorkArea() {
+  if (process.platform !== "win32") {
+    return null;
+  }
+  try {
+    const script = [
+      "Add-Type -AssemblyName System.Windows.Forms",
+      "$area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea",
+      "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+      "@{ left=$area.Left; top=$area.Top; width=$area.Width; height=$area.Height } | ConvertTo-Json -Compress"
+    ].join("; ");
+    const raw = execFileSync("powershell.exe", [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      script
+    ], {
+      encoding: "utf8",
+      timeout: 5000,
+      windowsHide: true
+    });
+    const match = String(raw || "").match(/\{[\s\S]*\}/);
+    return match ? JSON.parse(match[0]) : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function visibleBrowserBounds() {
+  return visibleBrowserBoundsForWorkArea(readPrimaryScreenWorkArea() || {});
+}
+
+function addVisibleBrowserLaunchArgs(args, bounds) {
+  args.push(`--window-size=${bounds.width},${bounds.height}`);
+  args.push(`--window-position=${bounds.x},${bounds.y}`);
+  return args;
 }
 
 function ask(question) {
@@ -1207,12 +1278,17 @@ async function detectTrackByOpeningForm(url, options = {}) {
     throw new Error("这不是腾讯文档表单链接。");
   }
 
+  const visibleBounds = options.visible === true ? visibleBrowserBounds() : null;
+  const launchArgs = ["--disable-blink-features=AutomationControlled"];
+  if (visibleBounds) {
+    addVisibleBrowserLaunchArgs(launchArgs, visibleBounds);
+  }
   const browser = await chromium.launch({
     headless: options.visible !== true,
-    args: ["--disable-blink-features=AutomationControlled"]
+    args: launchArgs
   });
   const context = await browser.newContext({
-    viewport: { width: 1360, height: 1200 },
+    viewport: visibleBounds ? null : { width: 1360, height: 1200 },
     locale: "zh-CN"
   });
   const page = await context.newPage();
@@ -1396,12 +1472,16 @@ async function runFromArgs(args = process.argv.slice(2), logger = console.log, o
   if (usingEdge && edgeProfile && !fs.existsSync(path.join(profileDir, edgeProfile))) {
     throw new Error(`没有找到 Edge 用户配置：${edgeProfile}`);
   }
+  const visibleBounds = shouldOpenVisible ? visibleBrowserBounds() : null;
   const launchOptions = {
     headless: !shouldOpenVisible,
-    viewport: { width: 1360, height: 1200 },
+    viewport: visibleBounds ? null : { width: 1360, height: 1200 },
     locale: "zh-CN",
     args: ["--disable-blink-features=AutomationControlled"]
   };
+  if (visibleBounds) {
+    addVisibleBrowserLaunchArgs(launchOptions.args, visibleBounds);
+  }
 
   if (usingEdge) {
     const edgePath = findEdgeExecutable();
@@ -1608,6 +1688,7 @@ module.exports = {
   _internal: {
     pickType,
     scoreType,
-    trackListForDouyin
+    trackListForDouyin,
+    visibleBrowserBoundsForWorkArea
   }
 };
