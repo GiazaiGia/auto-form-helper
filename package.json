@@ -1,6 +1,6 @@
 {
   "name": "auto-form-helper",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "private": true,
   "description": "Windows local tool for monitoring WeChat form links and filling Tencent Docs forms.",
   "main": "src/electron-main.js",

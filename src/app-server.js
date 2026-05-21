@@ -1422,6 +1422,20 @@ function historyItemsForExport({ range = "today" } = {}) {
     .sort((a, b) => historyExportTime(a) - historyExportTime(b));
 }
 
+function resolveHistoryExportDir(options = {}) {
+  const requested = String(options.outputDir || options.dir || "").trim();
+  if (!requested) {
+    fs.mkdirSync(outputDir, { recursive: true });
+    return outputDir;
+  }
+  const target = path.resolve(requested);
+  if (fs.existsSync(target) && !fs.statSync(target).isDirectory()) {
+    throw new Error("导出路径不是文件夹");
+  }
+  fs.mkdirSync(target, { recursive: true });
+  return target;
+}
+
 function exportHistoryExcel(options = {}) {
   const range = String(options.range || "today");
   const items = historyItemsForExport({ range });
@@ -1450,12 +1464,13 @@ function exportHistoryExcel(options = {}) {
   ];
   XLSX.utils.book_append_sheet(workbook, worksheet, "成功记录");
 
-  fs.mkdirSync(outputDir, { recursive: true });
+  const exportDir = resolveHistoryExportDir(options);
   const fileName = `填表记录-${range === "today" ? "今日成功记录" : "成功记录"}-${exportFileStamp()}.xlsx`;
-  const filePath = path.join(outputDir, fileName);
+  const filePath = path.join(exportDir, fileName);
   XLSX.writeFile(workbook, filePath);
   return {
     path: filePath,
+    dir: exportDir,
     fileName,
     count: items.length
   };

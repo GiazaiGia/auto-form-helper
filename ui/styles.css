@@ -1294,6 +1294,10 @@ button:disabled {
   margin-bottom: 12px;
 }
 
+.history-export-path {
+  margin: 0 0 12px;
+}
+
 .history-filter-tabs {
   display: flex;
   flex-wrap: wrap;

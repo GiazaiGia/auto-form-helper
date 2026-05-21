@@ -123,6 +123,8 @@ const monitorMetricPending = document.querySelector("#monitorMetricPending");
 const monitorMetricToday = document.querySelector("#monitorMetricToday");
 const refreshHistoryBtn = document.querySelector("#refreshHistoryBtn");
 const exportTodayFilledBtn = document.querySelector("#exportTodayFilledBtn");
+const historyExportDir = document.querySelector("#historyExportDir");
+const pickHistoryExportDirBtn = document.querySelector("#pickHistoryExportDirBtn");
 const historyList = document.querySelector("#historyList");
 const historyRangeButtons = Array.from(document.querySelectorAll("[data-history-range]"));
 const historyTypeButtons = Array.from(document.querySelectorAll("[data-history-type]"));
@@ -142,6 +144,7 @@ const loginStatusSummary = document.querySelector("#loginStatusSummary");
 const loginStatusList = document.querySelector("#loginStatusList");
 const checkAllLoginBtn = document.querySelector("#checkAllLoginBtn");
 const activeJobStatuses = new Set(["queued", "running", "stopping"]);
+const historyExportDirStorageKey = "auto-form-history-export-dir";
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -2844,15 +2847,58 @@ function renderHistoryQuickSummary(items = []) {
   }
 }
 
+function loadHistoryExportDir() {
+  if (!historyExportDir) {
+    return;
+  }
+  try {
+    historyExportDir.value = localStorage.getItem(historyExportDirStorageKey) || "";
+  } catch (error) {
+    historyExportDir.value = "";
+  }
+}
+
+function saveHistoryExportDir(value = "") {
+  if (!historyExportDir) {
+    return;
+  }
+  historyExportDir.value = value;
+  try {
+    if (value) {
+      localStorage.setItem(historyExportDirStorageKey, value);
+    } else {
+      localStorage.removeItem(historyExportDirStorageKey);
+    }
+  } catch (error) {
+    // localStorage may be unavailable in some embedded environments.
+  }
+}
+
+async function pickHistoryExportDir() {
+  const result = await api("/api/pick-path", {
+    method: "POST",
+    body: JSON.stringify({
+      type: "folder",
+      title: "选择历史记录导出文件夹"
+    })
+  });
+  if (result.path) {
+    saveHistoryExportDir(result.path);
+    setPageStatus("已选择历史记录导出位置");
+  }
+}
+
 async function exportTodayFilledHistory() {
   if (exportTodayFilledBtn) {
     exportTodayFilledBtn.disabled = true;
     exportTodayFilledBtn.textContent = "导出中";
   }
   try {
+    const outputDir = historyExportDir ? historyExportDir.value.trim() : "";
+    saveHistoryExportDir(outputDir);
     const result = await api("/api/history/export", {
       method: "POST",
-      body: JSON.stringify({ range: "today" })
+      body: JSON.stringify({ range: "today", outputDir })
     });
     setPageStatus(`已导出 ${result.count} 条今日成功记录`);
     await api("/api/open-path", {
@@ -3966,6 +4012,12 @@ refreshHistoryBtn.addEventListener("click", () => loadHistory().catch((error) =>
 if (exportTodayFilledBtn) {
   exportTodayFilledBtn.addEventListener("click", () => exportTodayFilledHistory().catch((error) => alert(error.message)));
 }
+if (pickHistoryExportDirBtn) {
+  pickHistoryExportDirBtn.addEventListener("click", () => pickHistoryExportDir().catch((error) => alert(error.message)));
+}
+if (historyExportDir) {
+  historyExportDir.addEventListener("change", () => saveHistoryExportDir(historyExportDir.value.trim()));
+}
 if (checkAllLoginBtn) {
   checkAllLoginBtn.addEventListener("click", () => checkAllLoginStatus().catch((error) => alert(error.message)));
 }
@@ -4175,6 +4227,7 @@ refreshBtn.addEventListener("click", () => {
 
 async function boot() {
   renderFormMode();
+  loadHistoryExportDir();
   await loadState();
   renderBatchPreview();
   await Promise.all([

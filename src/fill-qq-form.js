@@ -110,6 +110,11 @@ function throwIfAborted(signal) {
   }
 }
 
+function shouldAutoCloseVisibleError(error) {
+  const message = String(error && error.message || error || "");
+  return /已经提交过|没有找到“再填一份”|不可填写|暂停收集|停止收集|收集上限|收集已结束|当前不可填写/.test(message);
+}
+
 async function abortableWait(page, ms, signal) {
   throwIfAborted(signal);
   if (!signal) {
@@ -1560,7 +1565,16 @@ async function runFromArgs(args = process.argv.slice(2), logger = console.log, o
       && !loginOnly
       && !checkLogin
       && !(signal && signal.aborted);
-    if (shouldKeepErrorWindow) {
+    const autoCloseErrorWindow = shouldKeepErrorWindow && shouldAutoCloseVisibleError(error);
+    if (autoCloseErrorWindow) {
+      log("");
+      log(`这个表单已提交或不可填写，已自动关闭：${error.message}`);
+      await abortableWait(page, 1000, signal).catch((waitError) => {
+        if (signal && signal.aborted) {
+          throw waitError;
+        }
+      });
+    } else if (shouldKeepErrorWindow) {
       const waitMs = dryRun || keepOpen ? 10 * 60 * 1000 : 2 * 60 * 1000;
       log("");
       log(`填表出错：${error.message}`);
