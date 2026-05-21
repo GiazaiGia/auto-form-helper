@@ -78,10 +78,13 @@ function safeProfileName(value) {
 }
 
 function findEdgeExecutable() {
-  const candidates = [
+  const candidates = uniqueCleanList([
+    process.env["ProgramFiles(x86)"] && path.join(process.env["ProgramFiles(x86)"], "Microsoft", "Edge", "Application", "msedge.exe"),
+    process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, "Microsoft", "Edge", "Application", "msedge.exe"),
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "Microsoft", "Edge", "Application", "msedge.exe"),
     "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
     "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe"
-  ];
+  ].filter(Boolean));
   return candidates.find((candidate) => fs.existsSync(candidate)) || "";
 }
 

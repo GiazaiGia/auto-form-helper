@@ -3454,8 +3454,8 @@ if ([ResizeWindowApi]::IsIconic($hwnd)) {
 $rect = New-Object ResizeWindowApi+RECT
 [ResizeWindowApi]::GetWindowRect($hwnd, [ref]$rect) | Out-Null
 $screen = [System.Windows.Forms.Screen]::FromHandle($hwnd).WorkingArea
-$width = ${Math.round(safeWidth)}
-$height = ${Math.round(safeHeight)}
+$width = [Math]::Min(${Math.round(safeWidth)}, [Math]::Max(360, $screen.Width - 40))
+$height = [Math]::Min(${Math.round(safeHeight)}, [Math]::Max(360, $screen.Height - 40))
 $left = $rect.Left
 $top = $rect.Top
 if ($left -lt $screen.Left) { $left = $screen.Left }

@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { app, BrowserWindow, shell, dialog } = require("electron");
+const { app, BrowserWindow, shell, dialog, screen } = require("electron");
 
 let mainWindow;
 let monitorWindow;
@@ -82,6 +82,40 @@ function activeWindow() {
 function showAppDialog(options) {
   const parent = activeWindow();
   return parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
+}
+
+function clampNumber(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function adaptiveWindowBounds({ idealWidth, idealHeight, minWidth = 760, minHeight = 560, margin = 48 }) {
+  let workArea = { x: 0, y: 0, width: idealWidth, height: idealHeight };
+  try {
+    const primary = screen.getPrimaryDisplay();
+    if (primary && primary.workArea) {
+      workArea = primary.workArea;
+    }
+  } catch (error) {
+    console.error("Failed to read display work area:", error && error.message ? error.message : error);
+  }
+
+  const availableWidth = Math.max(360, Number(workArea.width || idealWidth) - margin);
+  const availableHeight = Math.max(360, Number(workArea.height || idealHeight) - margin);
+  const effectiveMinWidth = Math.min(minWidth, availableWidth);
+  const effectiveMinHeight = Math.min(minHeight, availableHeight);
+  const width = Math.round(clampNumber(idealWidth, effectiveMinWidth, availableWidth));
+  const height = Math.round(clampNumber(idealHeight, effectiveMinHeight, availableHeight));
+  const x = Math.round(Number(workArea.x || 0) + Math.max(0, (Number(workArea.width || width) - width) / 2));
+  const y = Math.round(Number(workArea.y || 0) + Math.max(0, (Number(workArea.height || height) - height) / 2));
+
+  return {
+    width,
+    height,
+    minWidth: Math.round(effectiveMinWidth),
+    minHeight: Math.round(effectiveMinHeight),
+    x,
+    y
+  };
 }
 
 function setupAutoUpdates() {
@@ -200,12 +234,13 @@ function createWindow(url) {
   const tool = selectedTool();
   const isFormTool = tool === "form";
   const title = isFormTool ? "自动填表助手" : "剪映批量草稿工具";
+  const bounds = adaptiveWindowBounds({
+    idealWidth: isFormTool ? 1180 : 1240,
+    idealHeight: 820
+  });
 
   mainWindow = new BrowserWindow({
-    width: isFormTool ? 1180 : 1240,
-    height: 820,
-    minWidth: 980,
-    minHeight: 680,
+    ...bounds,
     title,
     icon: path.join(__dirname, "..", "assets", "app-icon.ico"),
     backgroundColor: "#eef1f5",
@@ -242,11 +277,12 @@ function createMonitorWindow(url) {
     monitorWindow.focus();
     return;
   }
+  const bounds = adaptiveWindowBounds({
+    idealWidth: 1380,
+    idealHeight: 880
+  });
   monitorWindow = new BrowserWindow({
-    width: 1380,
-    height: 880,
-    minWidth: 1100,
-    minHeight: 720,
+    ...bounds,
     title: "微信监控台",
     icon: path.join(__dirname, "..", "assets", "app-icon.ico"),
     backgroundColor: "#eef1f5",

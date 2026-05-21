@@ -1047,7 +1047,7 @@ p,
   color: #475569;
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1180px) {
   .platform-head,
   .layout {
     display: block;
