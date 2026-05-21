@@ -1554,6 +1554,24 @@ async function runFromArgs(args = process.argv.slice(2), logger = console.log, o
       filledCount: results.reduce((sum, item) => sum + Number(item.filledCount || 0), 0),
       skippedCount: results.reduce((sum, item) => sum + Number(item.skippedCount || 0), 0)
     };
+  } catch (error) {
+    const shouldKeepErrorWindow = shouldOpenVisible
+      && !background
+      && !loginOnly
+      && !checkLogin
+      && !(signal && signal.aborted);
+    if (shouldKeepErrorWindow) {
+      const waitMs = dryRun || keepOpen ? 10 * 60 * 1000 : 2 * 60 * 1000;
+      log("");
+      log(`填表出错：${error.message}`);
+      log(`为了方便检查，浏览器窗口会保留 ${Math.round(waitMs / 1000)} 秒后关闭。`);
+      await abortableWait(page, waitMs, signal).catch((waitError) => {
+        if (signal && signal.aborted) {
+          throw waitError;
+        }
+      });
+    }
+    throw error;
   } finally {
     if (signal && onAbort) {
       signal.removeEventListener("abort", onAbort);
