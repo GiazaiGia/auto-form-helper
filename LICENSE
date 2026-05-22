@@ -1,0 +1,41 @@
+Auto Form Helper Source Available License v1.0
+
+Copyright (c) 2026 GiazaiGia
+
+This software is source-available, but it is not open source under an OSI-approved
+license. The source code is published so users can inspect it, learn from it,
+modify it, compile it, and run their own modified copies.
+
+Permission is granted, free of charge, to any person obtaining a copy of this
+software and associated documentation files to:
+
+1. View, download, fork, and study the source code.
+2. Modify the source code for personal, learning, testing, or internal
+   non-commercial use.
+3. Compile and run original or modified copies for personal or internal
+   non-commercial use.
+4. Share source-code changes, patches, or forks, provided that this license and
+   copyright notice remain included.
+
+The following actions are not permitted without prior written permission from
+the copyright holder:
+
+1. Selling, renting, sublicensing, or commercially hosting this software or a
+   modified version of it.
+2. Distributing compiled installers, binaries, executables, or packaged apps
+   based on this software.
+3. Rebranding this software or a modified version as a separate product for
+   public distribution.
+4. Removing or hiding the copyright notice, license text, or original project
+   attribution.
+5. Using the project name, icons, screenshots, or author identity to imply
+   endorsement of an unofficial version.
+
+Third-party dependencies remain governed by their own licenses.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
